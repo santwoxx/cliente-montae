@@ -1,157 +1,186 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { RotateCcw, Check, PenTool } from 'lucide-react';
+// ============================================================
+// MontaÊ - Captura de assinatura digital
+//
+// Melhorias sobre a versão anterior:
+//  - o traço acompanha a rotação da tela (antes a assinatura sumia)
+//  - usa Pointer Events, cobrindo dedo, caneta e mouse com um só código
+//  - captura o ponteiro, então o traço não corta ao sair da área
+//  - ignora toques múltiplos, evitando riscos ao apoiar a mão
+// ============================================================
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { RotateCcw, PenTool, Check } from 'lucide-react';
+
+const PAD_HEIGHT = 180;
 
 export default function SignaturePad({
   title = 'Assinatura',
-  signerLabel = 'Nome do Assinante',
+  signerLabel = '',
   onSave,
   initialSignature = null,
   readOnly = false
 }) {
   const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
-  const lastPos = useRef({ x: 0, y: 0 });
+  const drawingRef = useRef(false);
+  const lastRef = useRef({ x: 0, y: 0 });
+  const activePointerRef = useRef(null);
+  const [hasInk, setHasInk] = useState(Boolean(initialSignature));
 
-  // Initialize canvas with high DPI for crisp signature lines
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  /** Prepara o contexto na resolução real do aparelho (traço nítido). */
+  const configure = useCallback((canvas) => {
+    const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+    const width = canvas.clientWidth || 420;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(PAD_HEIGHT * ratio);
 
-    const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    const rect = canvas.getBoundingClientRect();
-    
-    // Set actual display size in CSS pixels
-    const width = rect.width || 420;
-    const height = 180;
-    
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    
     const ctx = canvas.getContext('2d');
-    ctx.scale(ratio, ratio);
-    ctx.strokeStyle = '#0f172a'; // Deep dark ink
-    ctx.lineWidth = 2.5;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.strokeStyle = '#101828';
+    ctx.lineWidth = 2.4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    return ctx;
+  }, []);
 
-    if (initialSignature) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, width, height);
-        setHasDrawn(true);
-      };
-      img.src = initialSignature;
-    }
-  }, [initialSignature]);
-
-  const getCoordinates = (e) => {
+  // Desenha a assinatura já existente e redesenha ao redimensionar.
+  useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
+    if (!canvas) return undefined;
 
-    if (e.touches && e.touches.length > 0) {
-      return {
-        x: e.touches[0].clientX - rect.left,
-        y: e.touches[0].clientY - rect.top
+    let frame = 0;
+
+    const render = () => {
+      const ctx = configure(canvas);
+      if (!initialSignature) return;
+      const image = new Image();
+      image.onload = () => {
+        ctx.drawImage(image, 0, 0, canvas.clientWidth, PAD_HEIGHT);
+        setHasInk(true);
       };
-    }
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      image.src = initialSignature;
     };
+
+    render();
+
+    // Redimensionar zera o canvas: guardamos o traço e o repomos.
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const snapshot = hasInk ? canvas.toDataURL('image/png') : null;
+        const ctx = configure(canvas);
+        if (!snapshot) return;
+        const image = new Image();
+        image.onload = () => ctx.drawImage(image, 0, 0, canvas.clientWidth, PAD_HEIGHT);
+        image.src = snapshot;
+      });
+    });
+
+    observer.observe(canvas);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+    // `hasInk` fica fora das dependências de propósito: só é lido dentro
+    // do observer, e incluí-lo recriaria o observer a cada traço.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSignature, configure]);
+
+  const pointFrom = (event) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
-  const startDrawing = (e) => {
-    if (readOnly) return;
-    e.preventDefault();
-    const pos = getCoordinates(e);
-    lastPos.current = pos;
-    setIsDrawing(true);
+  const handleDown = (event) => {
+    if (readOnly || activePointerRef.current !== null) return;
+    event.preventDefault();
+    activePointerRef.current = event.pointerId;
+    // Mantém o traço mesmo se o dedo escapar da área do quadro.
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    drawingRef.current = true;
+    lastRef.current = pointFrom(event);
   };
 
-  const draw = (e) => {
-    if (!isDrawing || readOnly) return;
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const newPos = getCoordinates(e);
+  const handleMove = (event) => {
+    if (!drawingRef.current || readOnly) return;
+    if (activePointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+
+    const ctx = canvasRef.current.getContext('2d');
+    const point = pointFrom(event);
 
     ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(newPos.x, newPos.y);
+    ctx.moveTo(lastRef.current.x, lastRef.current.y);
+    ctx.lineTo(point.x, point.y);
     ctx.stroke();
 
-    lastPos.current = newPos;
-    setHasDrawn(true);
+    lastRef.current = point;
+    if (!hasInk) setHasInk(true);
   };
 
-  const stopDrawing = () => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    if (onSave && canvasRef.current) {
-      const dataUrl = canvasRef.current.toDataURL('image/png');
-      onSave(dataUrl);
-    }
+  const handleUp = (event) => {
+    if (activePointerRef.current !== event.pointerId) return;
+    activePointerRef.current = null;
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    onSave?.(canvasRef.current.toDataURL('image/png'));
   };
 
-  const clearCanvas = () => {
+  const clear = () => {
     if (readOnly) return;
     const canvas = canvasRef.current;
-    if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    ctx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
-    setHasDrawn(false);
-    if (onSave) onSave(null);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasInk(false);
+    onSave?.(null);
   };
 
   return (
-    <div style={{ marginBottom: '18px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+    <div className="sign-block">
+      <div className="sign-head">
         <div>
-          <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <PenTool size={16} color="var(--gold-primary)" />
+          <span className="sign-title">
+            <PenTool size={15} aria-hidden="true" />
             {title}
           </span>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block' }}>
-            {signerLabel}
-          </span>
+          {signerLabel && <span className="sign-who">{signerLabel}</span>}
         </div>
-        {!readOnly && (
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={clearCanvas}
-            title="Limpar assinatura para assinar novamente"
-            style={{ fontSize: '11px', padding: '4px 10px' }}
-          >
-            <RotateCcw size={12} /> Limpar
+
+        {!readOnly && hasInk && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={clear}>
+            <RotateCcw size={12} aria-hidden="true" />
+            Limpar
           </button>
         )}
       </div>
 
-      <div className="signature-box" style={{ background: '#ffffff', minHeight: '180px' }}>
+      <div
+        className={`sign-pad ${hasInk ? 'is-signed' : ''} ${readOnly ? 'is-readonly' : ''}`}
+      >
         <canvas
           ref={canvasRef}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-          style={{ width: '100%', height: '180px', display: 'block', cursor: readOnly ? 'default' : 'crosshair' }}
+          style={{ height: PAD_HEIGHT }}
+          onPointerDown={handleDown}
+          onPointerMove={handleMove}
+          onPointerUp={handleUp}
+          onPointerCancel={handleUp}
+          aria-label={`Área de assinatura: ${title}`}
         />
-        <div className="signature-guide" />
-        {!hasDrawn && !readOnly && (
-          <div className="signature-placeholder">
-            <span>✍️ Toque com o dedo ou mouse para assinar</span>
-          </div>
+        <div className="sign-rule" aria-hidden="true" />
+        {!hasInk && !readOnly && (
+          <div className="sign-hint">Assine aqui com o dedo ou o mouse</div>
         )}
       </div>
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'right' }}>
-        {hasDrawn ? '✓ Assinatura digital capturada com sucesso' : 'Aguardando assinatura digital'}
+
+      <div className={`sign-status ${hasInk ? 'is-done' : ''}`}>
+        {hasInk ? (
+          <>
+            <Check size={11} style={{ display: 'inline', verticalAlign: -1 }} aria-hidden="true" />{' '}
+            Assinatura capturada
+          </>
+        ) : (
+          'Aguardando assinatura'
+        )}
       </div>
     </div>
   );

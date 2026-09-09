@@ -1,0 +1,148 @@
+rules_version = '2';
+
+// ============================================================
+// MontaE - Regras de seguranca do Firestore
+// Deploy:  npx firebase deploy --only firestore:rules
+//
+// Modelo de acesso:
+//   admin     -> tudo, inclusive financeiro
+//   montador  -> ordens, clientes e equipe (sem financeiro)
+//   pendente  -> conta criada, aguardando liberacao (sem acesso)
+//   anonimo   -> apenas envia orcamento pelo link publico
+// ============================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Usuario "de verdade" (email/senha). Visitantes do link publico
+    // entram como anonimos e NAO passam por aqui.
+    function isStaff() {
+      return isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isStaff()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc().role == role
+        && userDoc().active == true;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isAssembler() {
+      return hasRole('montador');
+    }
+
+    function isActiveStaff() {
+      return isAdmin() || isAssembler();
+    }
+
+    // ---------- users ----------
+    // Um usuario novo so consegue criar o proprio documento como
+    // "pendente" e inativo: e impossivel se auto-promover a admin.
+    // O primeiro admin e liberado uma unica vez pelo Console do
+    // Firebase (veja o README); dai em diante o admin libera os demais.
+    match /users/{uid} {
+      allow read: if isStaff() && (request.auth.uid == uid || isActiveStaff());
+
+      allow create: if isStaff()
+                    && request.auth.uid == uid
+                    && request.resource.data.email == request.auth.token.email
+                    && request.resource.data.role == 'pendente'
+                    && request.resource.data.active == false;
+
+      // O proprio usuario pode ajustar apenas o nome de exibicao.
+      allow update: if isAdmin()
+                    || (isStaff()
+                        && request.auth.uid == uid
+                        && request.resource.data.role == resource.data.role
+                        && request.resource.data.active == resource.data.active);
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------- settings (perfil da empresa) ----------
+    // O documento "licenca" controla a mensalidade e e SOMENTE LEITURA
+    // para todo mundo, inclusive para o administrador do cliente. Ele e
+    // alterado apenas pelo desenvolvedor, pelo Console do Firebase, que
+    // ignora estas regras. Sem isso o proprio cliente se desbloquearia.
+    match /settings/{docId} {
+      allow read: if true;               // o link publico exibe marca/contato
+      allow write: if isAdmin() && docId != 'licenca';
+    }
+
+    // ---------- employees (montadores) ----------
+    match /employees/{docId} {
+      allow read: if isActiveStaff();
+      allow write: if isAdmin();
+    }
+
+    // ---------- clients (CRM) ----------
+    match /clients/{docId} {
+      allow read: if isActiveStaff();
+      allow create, update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- orders (ordens de servico) ----------
+    match /orders/{docId} {
+      allow read: if isActiveStaff();
+
+      // O visitante do link publico so pode CRIAR um orcamento,
+      // com status 'orcamento', sem se marcar como pago e sem
+      // conseguir ler ou alterar qualquer ordem existente.
+      allow create: if isActiveStaff()
+                    || (isSignedIn()
+                        && request.resource.data.status == 'orcamento'
+                        && request.resource.data.source == 'link_orcamento'
+                        && request.resource.data.paymentStatus == 'pendente'
+                        && request.resource.data.clientName is string
+                        && request.resource.data.clientName.size() > 1
+                        && request.resource.data.clientName.size() < 120
+                        && request.resource.data.totalValue is number
+                        && request.resource.data.totalValue >= 0
+                        && request.resource.data.totalValue < 1000000);
+
+      allow update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- financial (lancamentos) ----------
+    // Financeiro e exclusivo do administrador.
+    match /financial/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------- counters (numeracao sequencial das OS) ----------
+    // Precisa ser gravavel tambem pelo visitante anonimo, senao o
+    // link publico nao consegue gerar o numero da OS. O contador so
+    // pode AVANCAR, nunca ser zerado ou adulterado para tras.
+    match /counters/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+                    && request.resource.data.value is int
+                    && request.resource.data.value > 0;
+      allow update: if isSignedIn()
+                    && request.resource.data.value is int
+                    && request.resource.data.value > resource.data.value
+                    && request.resource.data.value < resource.data.value + 50;
+      allow delete: if false;
+    }
+
+    // Tudo o que nao foi declarado acima e negado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

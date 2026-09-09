@@ -25,3 +25,13 @@ dist-ssr
 
 # Temp files
 logo_temp.jpeg
+
+# Ambiente
+.env
+.env.local
+.env.*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+.firebaserc

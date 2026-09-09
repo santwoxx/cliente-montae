@@ -1,20 +1,68 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <!-- user-scalable=no foi removido: impedir o zoom quebra a acessibilidade -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light" />
+
+    <title>MontaÊ · Gestão de Montagens de Móveis</title>
+    <meta
+      name="description"
+      content="MontaÊ - sistema de gestão para montagem de móveis: ordens de serviço, CRM de clientes, controle financeiro, assinatura digital e orçamento online."
+    />
+    <meta name="author" content="MontaÊ" />
+    <meta name="robots" content="index, follow" />
+
     <link rel="icon" type="image/jpeg" href="/logo.jpeg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0f1115" />
-    <title>MontaÊ | Gestão, Serviços & Montagens de Móveis</title>
-    <meta name="description" content="MontaÊ - Monta. Repara. Conecta. Sistema de gestão financeira, ordens de montagem, assinatura digital e orçamentos." />
-    
-    <!-- Google Fonts -->
+    <link rel="apple-touch-icon" href="/logo.jpeg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="canonical" href="https://cliente-montae.vercel.app/" />
+
+    <!-- Instalação como app no iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="MontaÊ" />
+
+    <!-- Compartilhamento em redes e WhatsApp -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MontaÊ" />
+    <meta property="og:title" content="MontaÊ · Monta. Repara. Conecta." />
+    <meta
+      property="og:description"
+      content="Montagem profissional de móveis com garantia e assinatura digital. Monte seu orçamento em 1 minuto."
+    />
+    <meta property="og:image" content="/logo.jpeg" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta name="twitter:card" content="summary" />
+
+    <!-- Fontes: preconnect reduz o tempo até o primeiro texto -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Caveat:wght@600&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Caveat:wght@600&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* Evita o flash branco enquanto o JavaScript carrega. */
+      #root:empty::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: #f7f8fa;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="padding: 24px; font-family: sans-serif; text-align: center">
+        <h1>MontaÊ</h1>
+        <p>Este sistema precisa de JavaScript ativado para funcionar.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -1,525 +1,538 @@
-import React, { useState } from 'react';
-import confetti from 'canvas-confetti';
-import { 
-  Sparkles, 
-  CheckCircle, 
-  Plus, 
-  Minus, 
-  Calendar, 
-  MapPin, 
-  Phone, 
-  User, 
-  ShieldCheck, 
-  Send, 
-  MessageSquare, 
-  ArrowRight,
-  RotateCcw,
-  Check,
-  Award
-} from 'lucide-react';
-import { FURNITURE_CATALOG, SERVICE_MODIFIERS, formatBRL, formatWhatsAppLink } from '../services/calculations';
+// ============================================================
+// MontaÊ - Link público de orçamento
+//
+// Única tela aberta a quem não tem conta. O visitante monta o
+// próprio orçamento e o pedido cai direto na aba Ordens.
+// ============================================================
 
-export default function PublicQuoteView({ profile, onSaveOrder, onReturnToAdmin }) {
-  // Client contact state
-  const [clientData, setClientData] = useState({
+import React, { useEffect, useMemo, useState } from 'react';
+import confetti from 'canvas-confetti';
+import {
+  Sparkles,
+  CheckCircle,
+  Plus,
+  Minus,
+  Calendar,
+  User,
+  Send,
+  MessageSquare,
+  RotateCcw,
+  ShieldCheck,
+  ArrowLeft,
+  Clock,
+  Trash2
+} from 'lucide-react';
+import Logo from '../components/Logo';
+import {
+  FURNITURE_CATALOG,
+  SERVICE_MODIFIERS,
+  CATALOG_CATEGORIES,
+  formatBRL,
+  formatPhoneBR,
+  formatWhatsAppLink,
+  isValidPhoneBR,
+  quoteItemSubtotal,
+  quoteTotal,
+  estimatedDuration,
+  todayISO
+} from '../services/calculations';
+import { AuthService } from '../services/auth';
+import { useData } from '../context/DataContext';
+import { useToast } from '../context/ToastContext';
+
+const PERIODS = [
+  'Manhã (08h às 12h)',
+  'Tarde (13h às 18h)',
+  'Sábado de manhã',
+  'Qualquer horário'
+];
+
+export default function PublicQuoteView({ onBackToAdmin }) {
+  const { profile, submitPublicQuote } = useData();
+  const { toast } = useToast();
+
+  const [form, setForm] = useState({
     name: '',
     phone: '',
-    email: '',
     address: '',
     neighborhood: '',
-    city: 'Florianópolis / São José - SC',
+    city: 'Florianópolis - SC',
     scheduledDate: '',
-    preferredPeriod: 'Manhã (08h às 12h)',
+    period: PERIODS[0],
     notes: ''
   });
+  const [items, setItems] = useState([]);
+  const [category, setCategory] = useState('Todos');
+  const [errors, setErrors] = useState({});
+  const [sending, setSending] = useState(false);
+  const [submitted, setSubmitted] = useState(null);
 
-  // Selected furniture items
-  const [selectedItems, setSelectedItems] = useState([
-    { catalogId: 'guarda-roupa-grande', qty: 1, serviceType: 'novo_caixa' }
-  ]);
+  // Sessão anônima: sem ela as regras do Firestore recusam a gravação.
+  useEffect(() => {
+    AuthService.signInAsVisitor().catch((error) => {
+      console.warn('[MontaÊ] Sessão de visitante indisponível:', error?.code);
+    });
+  }, []);
 
-  const [submittedOrder, setSubmittedOrder] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const catalog = useMemo(
+    () =>
+      category === 'Todos'
+        ? FURNITURE_CATALOG
+        : FURNITURE_CATALOG.filter((entry) => entry.category === category),
+    [category]
+  );
 
-  const categories = ['Todos', 'Quarto', 'Sala', 'Cozinha', 'Sala de Jantar', 'Escritório', 'Geral'];
+  const total = useMemo(() => quoteTotal(items), [items]);
+  const duration = useMemo(() => estimatedDuration(items), [items]);
 
-  // Add / Modify item helpers
-  const handleAddItem = (catalogItem) => {
-    const existingIndex = selectedItems.findIndex(i => i.catalogId === catalogItem.id);
-    if (existingIndex >= 0) {
-      const updated = [...selectedItems];
-      updated[existingIndex].qty += 1;
-      setSelectedItems(updated);
-    } else {
-      setSelectedItems([
-        ...selectedItems,
-        { catalogId: catalogItem.id, qty: 1, serviceType: 'novo_caixa' }
-      ]);
-    }
+  const addItem = (entry) => {
+    setItems((current) => {
+      const index = current.findIndex((item) => item.catalogId === entry.id);
+      if (index >= 0) {
+        return current.map((item, i) => (i === index ? { ...item, qty: item.qty + 1 } : item));
+      }
+      return [...current, { catalogId: entry.id, qty: 1, serviceType: 'novo_caixa' }];
+    });
+    if (errors.items) setErrors((current) => ({ ...current, items: undefined }));
   };
 
-  const handleRemoveItem = (index) => {
-    setSelectedItems(selectedItems.filter((_, idx) => idx !== index));
+  const updateItem = (index, field, value) => {
+    setItems((current) => current.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
   };
 
-  const handleUpdateItem = (index, field, value) => {
-    const updated = [...selectedItems];
-    updated[index][field] = value;
-    setSelectedItems(updated);
-  };
+  const removeItem = (index) => setItems((current) => current.filter((_, i) => i !== index));
 
-  // Calculate estimated total
-  const estimatedTotal = selectedItems.reduce((acc, cur) => {
-    const catalogItem = FURNITURE_CATALOG.find(c => c.id === cur.catalogId);
-    if (!catalogItem) return acc;
-    const modifier = SERVICE_MODIFIERS[cur.serviceType]?.multiplier || 1.0;
-    return acc + (catalogItem.basePrice * modifier * (cur.qty || 1));
-  }, 0);
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!clientData.name.trim() || !clientData.phone.trim()) {
-      alert('Por favor, informe seu nome e telefone/WhatsApp.');
+    const found = {};
+    if (!form.name.trim()) found.name = 'Informe seu nome.';
+    if (!form.phone.trim()) found.phone = 'Informe seu WhatsApp.';
+    else if (!isValidPhoneBR(form.phone)) found.phone = 'Telefone incompleto (DDD + número).';
+    if (!items.length) found.items = 'Escolha ao menos um móvel.';
+
+    setErrors(found);
+    if (Object.keys(found).length) {
+      toast.error('Confira os campos destacados.');
       return;
     }
-    if (selectedItems.length === 0) {
-      alert('Por favor, adicione ao menos um móvel para orçamento.');
-      return;
+
+    setSending(true);
+    try {
+      const formatted = items.map((item) => {
+        const entry = FURNITURE_CATALOG.find((c) => c.id === item.catalogId);
+        return {
+          name: entry?.name || 'Móvel',
+          qty: item.qty,
+          room: entry?.category || 'Geral',
+          type: SERVICE_MODIFIERS[item.serviceType]?.label || 'Novo na Caixa'
+        };
+      });
+
+      const saved = await submitPublicQuote({
+        clientName: form.name.trim(),
+        clientPhone: form.phone,
+        address: [form.address, form.neighborhood, form.city].filter(Boolean).join(', '),
+        items: formatted,
+        scheduledDate: form.scheduledDate || todayISO(),
+        scheduledTime: form.period.includes('Manhã') || form.period.includes('manhã') ? '09:00' : '14:00',
+        status: 'orcamento',
+        source: 'link_orcamento',
+        totalValue: total,
+        paymentMethod: 'Pix',
+        paymentStatus: 'pendente',
+        notes: `${form.notes ? `${form.notes} | ` : ''}Turno preferido: ${form.period}`
+      });
+
+      setSubmitted(saved);
+      confetti({ particleCount: 90, spread: 65, origin: { y: 0.5 } });
+    } catch (error) {
+      console.error(error);
+      toast.error('Não conseguimos enviar seu orçamento. Verifique a internet e tente de novo.');
+    } finally {
+      setSending(false);
     }
-
-    const itemsFormatted = selectedItems.map(item => {
-      const cat = FURNITURE_CATALOG.find(c => c.id === item.catalogId);
-      const mod = SERVICE_MODIFIERS[item.serviceType];
-      return {
-        name: cat ? cat.name : 'Móvel personalizado',
-        qty: item.qty,
-        room: cat ? cat.category : 'Geral',
-        type: mod ? mod.label : 'Novo na Caixa'
-      };
-    });
-
-    const fullAddress = `${clientData.address || ''}${clientData.neighborhood ? `, ${clientData.neighborhood}` : ''} - ${clientData.city}`;
-
-    const newOrder = {
-      clientName: clientData.name,
-      clientPhone: clientData.phone,
-      address: fullAddress,
-      items: itemsFormatted,
-      scheduledDate: clientData.scheduledDate || new Date().toISOString().split('T')[0],
-      scheduledTime: clientData.preferredPeriod.includes('Manhã') ? '09:00' : '14:00',
-      status: 'orcamento',
-      source: 'link_orcamento',
-      totalValue: estimatedTotal,
-      paymentMethod: 'Pix',
-      paymentStatus: 'pendente',
-      notes: `${clientData.notes ? clientData.notes + ' | ' : ''}Turno preferido: ${clientData.preferredPeriod}`
-    };
-
-    const saved = onSaveOrder(newOrder);
-    setSubmittedOrder(saved);
-
-    confetti({
-      particleCount: 80,
-      spread: 60,
-      origin: { y: 0.5 }
-    });
   };
 
-  const filteredCatalog = selectedCategory === 'Todos' 
-    ? FURNITURE_CATALOG 
-    : FURNITURE_CATALOG.filter(c => c.category === selectedCategory);
+  const restart = () => {
+    setSubmitted(null);
+    setItems([]);
+    setForm((current) => ({ ...current, notes: '', scheduledDate: '' }));
+  };
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-      {/* Return to Admin Button Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
-          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }}></span>
-          Visualização do Link Público do Cliente
-        </div>
-
-        {onReturnToAdmin && (
-          <button 
-            type="button" 
-            className="btn btn-secondary btn-sm"
-            onClick={onReturnToAdmin}
-          >
-            ← Voltar ao Painel Administrativo
-          </button>
-        )}
-      </div>
-
-      {/* Brand Header Banner */}
-      <div 
-        className="card" 
-        style={{ 
-          textAlign: 'center', 
-          padding: '32px 20px', 
-          background: 'linear-gradient(180deg, #181d26 0%, #0f1115 100%)', 
-          border: '1px solid var(--border-gold)',
-          marginBottom: '24px'
-        }}
-      >
-        <img 
-          src="/logo.jpeg" 
-          alt="MontaÊ Logo" 
-          style={{ height: '70px', width: 'auto', borderRadius: '8px', margin: '0 auto 12px auto', display: 'block' }}
-          onError={(e) => { e.target.style.display = 'none'; }}
-        />
-        <h1 style={{ fontSize: '28px', fontWeight: '800', color: '#fff', margin: '0 0 4px 0' }}>
-          Simulador & Solicitação de Orçamento
-        </h1>
-        <p style={{ fontSize: '13px', fontWeight: '700', color: 'var(--gold-hover)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-          {profile?.slogan || 'MONTA. REPARA. CONECTA.'}
-        </p>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '8px', maxWidth: '550px', margin: '8px auto 0 auto' }}>
-          Montagens profissionais de móveis com ferramentas adequadas, capricho no acabamento, pontualidade e <strong>garantia de 90 dias com assinatura digital</strong>.
-        </p>
-      </div>
-
-      {/* Success Confirmation State */}
-      {submittedOrder ? (
-        <div className="card" style={{ border: '1px solid var(--success)', textAlign: 'center', padding: '36px 24px' }}>
-          <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--success-bg)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto' }}>
-            <CheckCircle size={36} />
-          </div>
-
-          <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#fff', marginBottom: '8px' }}>
-            Orçamento Enviado com Sucesso!
-          </h2>
-
-          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto 20px auto' }}>
-            Obrigado, <strong>{submittedOrder.clientName}</strong>! Seu pedido foi registrado sob o protocolo <strong style={{ color: 'var(--gold-hover)' }}>{submittedOrder.id}</strong> e nossa equipe técnica já recebeu a notificação no painel.
-          </p>
-
-          <div style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', maxWidth: '480px', margin: '0 auto 24px auto', textAlign: 'left' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Estimativa Inicial:</span>
-              <strong style={{ color: 'var(--gold-hover)', fontSize: '16px' }}>{formatBRL(submittedOrder.totalValue)}</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Data Desejada:</span>
-              <span style={{ color: '#fff', fontSize: '13px' }}>{submittedOrder.scheduledDate}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Contato da MontaÊ:</span>
-              <span style={{ color: '#fff', fontSize: '13px' }}>{profile?.email || 'marcos.elias.sc@gmail.com'}</span>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '420px', margin: '0 auto' }}>
-            <a
-              href={formatWhatsAppLink(
-                profile?.phone || '48991823401', 
-                `Olá Marcos Elias (MontaÊ)! Acabei de solicitar o orçamento ${submittedOrder.id} no valor estimado de ${formatBRL(submittedOrder.totalValue)}. Meu nome é ${submittedOrder.clientName}. Podemos agendar?`
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-success btn-lg"
-            >
-              <MessageSquare size={18} /> Confirmar Agora pelo WhatsApp
-            </a>
-
-            <button 
-              className="btn btn-secondary"
-              onClick={() => {
-                setSubmittedOrder(null);
-                setSelectedItems([]);
+    <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      {onBackToAdmin && (
+        <div className="row-between mb-16">
+          <span className="fs-12 muted row" style={{ gap: 6 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: 'var(--ok)',
+                display: 'inline-block'
               }}
-            >
-              <RotateCcw size={15} /> Fazer Outro Orçamento
-            </button>
+            />
+            Prévia do link público
+          </span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onBackToAdmin}>
+            <ArrowLeft size={14} aria-hidden="true" />
+            Voltar ao painel
+          </button>
+        </div>
+      )}
+
+      <header className="quote-hero">
+        <Logo className="" size={68} alt="MontaÊ" />
+        <h1>Monte seu orçamento</h1>
+        <div className="tag">{profile?.slogan || 'MONTA. REPARA. CONECTA.'}</div>
+        <p>
+          Montagem profissional de móveis com ferramenta certa, acabamento caprichado, pontualidade e{' '}
+          <strong>garantia de {profile?.warrantyDays || 90} dias</strong> com assinatura digital.
+        </p>
+      </header>
+
+      {submitted ? (
+        <div className="card">
+          <div className="card-body" style={{ textAlign: 'center', padding: '36px 24px' }}>
+            <div className="confirm-icon" style={{ background: 'var(--ok-bg)', color: 'var(--ok)' }}>
+              <CheckCircle size={26} aria-hidden="true" />
+            </div>
+
+            <h2 className="fs-17" style={{ fontSize: 23 }}>
+              Orçamento enviado!
+            </h2>
+
+            <p className="text-2 mt-8" style={{ maxWidth: '46ch', margin: '8px auto 20px' }}>
+              Obrigado, <strong>{submitted.clientName}</strong>! Seu pedido foi registrado sob o
+              protocolo <strong style={{ color: 'var(--brand-strong)' }}>{submitted.id}</strong> e
+              nossa equipe já foi notificada.
+            </p>
+
+            <div className="panel mb-20" style={{ maxWidth: 420, margin: '0 auto 20px', textAlign: 'left' }}>
+              <div className="row-between fs-13 mb-8">
+                <span className="muted">Estimativa inicial</span>
+                <strong className="money">{formatBRL(submitted.totalValue)}</strong>
+              </div>
+              <div className="row-between fs-13 mb-8">
+                <span className="muted">Data desejada</span>
+                <span>{submitted.scheduledDate.split('-').reverse().join('/')}</span>
+              </div>
+              <div className="row-between fs-13">
+                <span className="muted">Contato MontaÊ</span>
+                <span>{profile?.phone}</span>
+              </div>
+            </div>
+
+            <div className="stack-sm" style={{ maxWidth: 420, margin: '0 auto' }}>
+              <a
+                className="btn btn-success btn-lg"
+                href={formatWhatsAppLink(
+                  profile?.phone,
+                  `Olá! Acabei de enviar o orçamento ${submitted.id} (${formatBRL(
+                    submitted.totalValue
+                  )}). Meu nome é ${submitted.clientName}. Podemos agendar?`
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <MessageSquare size={18} aria-hidden="true" />
+                Confirmar pelo WhatsApp
+              </a>
+              <button type="button" className="btn btn-secondary" onClick={restart}>
+                <RotateCcw size={15} aria-hidden="true" />
+                Fazer outro orçamento
+              </button>
+            </div>
           </div>
         </div>
       ) : (
-        /* Form for client */
-        <form onSubmit={handleSubmit}>
-          {/* Step 1: Customer Contact Info */}
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <div className="card-header">
-              <h3 className="card-title">
-                <User size={18} /> 1. Seus Dados de Contato e Local
-              </h3>
+        <form onSubmit={handleSubmit} noValidate>
+          {/* 1. Contato */}
+          <section className="card mb-20">
+            <div className="card-head">
+              <h2 className="card-title">
+                <User size={17} aria-hidden="true" />
+                1. Seus dados
+              </h2>
             </div>
+            <div className="card-body">
+              <div className="grid-2">
+                <div className="field">
+                  <label className="label" htmlFor="pq-name">
+                    Nome completo <span className="req">*</span>
+                  </label>
+                  <input
+                    id="pq-name"
+                    className={`input ${errors.name ? 'is-invalid' : ''}`}
+                    value={form.name}
+                    onChange={(e) => {
+                      setForm((c) => ({ ...c, name: e.target.value }));
+                      setErrors((c) => ({ ...c, name: undefined }));
+                    }}
+                    placeholder="Ex.: Mariana Costa"
+                    autoComplete="name"
+                  />
+                  {errors.name && <span className="field-error">{errors.name}</span>}
+                </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Seu Nome Completo *</label>
-                <input
-                  type="text"
-                  required
-                  className="form-control"
-                  placeholder="Ex: Mariana Costa"
-                  value={clientData.name}
-                  onChange={(e) => setClientData({ ...clientData, name: e.target.value })}
-                />
+                <div className="field">
+                  <label className="label" htmlFor="pq-phone">
+                    WhatsApp com DDD <span className="req">*</span>
+                  </label>
+                  <input
+                    id="pq-phone"
+                    className={`input ${errors.phone ? 'is-invalid' : ''}`}
+                    value={form.phone}
+                    onChange={(e) => {
+                      setForm((c) => ({ ...c, phone: formatPhoneBR(e.target.value) }));
+                      setErrors((c) => ({ ...c, phone: undefined }));
+                    }}
+                    placeholder="(48) 99912-3456"
+                    inputMode="tel"
+                    autoComplete="tel"
+                  />
+                  {errors.phone && <span className="field-error">{errors.phone}</span>}
+                </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">WhatsApp com DDD *</label>
-                <input
-                  type="text"
-                  required
-                  className="form-control"
-                  placeholder="Ex: 48999887766"
-                  value={clientData.phone}
-                  onChange={(e) => setClientData({ ...clientData, phone: e.target.value })}
-                />
+              <div className="grid-3">
+                <div className="field">
+                  <label className="label" htmlFor="pq-address">
+                    Endereço
+                  </label>
+                  <input
+                    id="pq-address"
+                    className="input"
+                    value={form.address}
+                    onChange={(e) => setForm((c) => ({ ...c, address: e.target.value }))}
+                    placeholder="Rua, número, apto"
+                    autoComplete="street-address"
+                  />
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="pq-neighborhood">
+                    Bairro
+                  </label>
+                  <input
+                    id="pq-neighborhood"
+                    className="input"
+                    value={form.neighborhood}
+                    onChange={(e) => setForm((c) => ({ ...c, neighborhood: e.target.value }))}
+                    placeholder="Ex.: Centro"
+                  />
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="pq-city">
+                    Cidade
+                  </label>
+                  <input
+                    id="pq-city"
+                    className="input"
+                    value={form.city}
+                    onChange={(e) => setForm((c) => ({ ...c, city: e.target.value }))}
+                  />
+                </div>
               </div>
             </div>
+          </section>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Endereço (Rua e Número)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Ex: Rua Felipe Schmidt, 250, Apto 401"
-                  value={clientData.address}
-                  onChange={(e) => setClientData({ ...clientData, address: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Bairro</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Ex: Centro"
-                  value={clientData.neighborhood}
-                  onChange={(e) => setClientData({ ...clientData, neighborhood: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Cidade</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={clientData.city}
-                  onChange={(e) => setClientData({ ...clientData, city: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Step 2: Furniture Selection */}
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <div className="card-header">
-              <h3 className="card-title">
-                <Sparkles size={18} /> 2. Escolha os Móveis para Montagem
-              </h3>
+          {/* 2. Móveis */}
+          <section className="card mb-20">
+            <div className="card-head">
+              <h2 className="card-title">
+                <Sparkles size={17} aria-hidden="true" />
+                2. Escolha os móveis
+              </h2>
             </div>
 
-            {/* Category tabs */}
-            <div className="nav-tabs" style={{ marginBottom: '16px', overflowX: 'auto' }}>
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  type="button"
-                  className={`nav-tab ${selectedCategory === cat ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(cat)}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-
-            {/* Catalog Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-              {filteredCatalog.map(catItem => (
-                <div 
-                  key={catItem.id}
-                  style={{
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '8px'
-                  }}
-                >
-                  <div>
-                    <span style={{ fontSize: '11px', color: 'var(--gold-hover)', fontWeight: '700', textTransform: 'uppercase' }}>
-                      {catItem.category}
-                    </span>
-                    <h4 style={{ fontSize: '13.5px', color: '#fff', margin: '2px 0 4px 0' }}>
-                      {catItem.name}
-                    </h4>
-                    <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--gold-hover)' }}>
-                      a partir de {formatBRL(catItem.basePrice)}
-                    </div>
-                  </div>
-
+            <div className="card-body">
+              <div className="segmented mb-16">
+                {CATALOG_CATEGORIES.map((item) => (
                   <button
+                    key={item}
                     type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => handleAddItem(catItem)}
-                    style={{ width: '100%', borderColor: 'var(--border-gold)' }}
+                    className={`segment ${category === item ? 'is-active' : ''}`}
+                    onClick={() => setCategory(item)}
                   >
-                    <Plus size={14} /> Adicionar
+                    {item}
                   </button>
+                ))}
+              </div>
+
+              <div className="catalog mb-20">
+                {catalog.map((entry) => (
+                  <div key={entry.id} className="catalog-item">
+                    <span className="catalog-cat">{entry.category}</span>
+                    <span className="catalog-name">{entry.name}</span>
+                    <span className="catalog-price">
+                      {formatBRL(entry.basePrice)}
+                      <small>a partir de</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm btn-block"
+                      onClick={() => addItem(entry)}
+                    >
+                      <Plus size={14} aria-hidden="true" />
+                      Adicionar
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Carrinho */}
+              <div className="panel">
+                <div className="row-between mb-12">
+                  <span className="stat-label">Selecionados ({items.length})</span>
+                  {duration && (
+                    <span className="badge badge-mute">
+                      <Clock size={11} aria-hidden="true" />
+                      {duration} estimadas
+                    </span>
+                  )}
                 </div>
-              ))}
-            </div>
 
-            {/* Selected Items List */}
-            <div style={{ background: 'var(--bg-input)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-              <h4 style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px' }}>
-                Móveis Selecionados ({selectedItems.length}):
-              </h4>
-
-              {selectedItems.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  Nenhum móvel selecionado acima ainda. Clique em "Adicionar" nos móveis desejados.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {selectedItems.map((item, idx) => {
-                    const catalogItem = FURNITURE_CATALOG.find(c => c.id === item.catalogId);
-                    const modifier = SERVICE_MODIFIERS[item.serviceType]?.multiplier || 1.0;
-                    const itemSubtotal = (catalogItem?.basePrice || 100) * modifier * item.qty;
-
-                    return (
-                      <div 
-                        key={idx}
-                        style={{
-                          background: 'var(--bg-card)',
-                          padding: '12px 14px',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid var(--border-subtle)',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          flexWrap: 'wrap',
-                          gap: '12px'
-                        }}
-                      >
-                        <div style={{ flex: '1 1 240px' }}>
-                          <div style={{ fontWeight: '700', color: '#fff', fontSize: '14px' }}>
-                            {catalogItem?.name || 'Móvel'}
-                          </div>
-
-                          <div style={{ marginTop: '6px' }}>
+                {items.length === 0 ? (
+                  <p className="fs-13 muted" style={{ textAlign: 'center', padding: '18px 0' }}>
+                    Nenhum móvel escolhido. Toque em “Adicionar” nos itens acima.
+                  </p>
+                ) : (
+                  <div className="stack-sm">
+                    {items.map((item, index) => {
+                      const entry = FURNITURE_CATALOG.find((c) => c.id === item.catalogId);
+                      return (
+                        <div key={`${item.catalogId}-${index}`} className="cart-row">
+                          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                            <div className="strong fs-13 mb-8">{entry?.name}</div>
                             <select
-                              className="form-control"
-                              style={{ width: 'auto', padding: '4px 10px', fontSize: '12px' }}
+                              className="select select-sm"
                               value={item.serviceType}
-                              onChange={(e) => handleUpdateItem(idx, 'serviceType', e.target.value)}
+                              onChange={(e) => updateItem(index, 'serviceType', e.target.value)}
+                              aria-label="Tipo de serviço"
                             >
-                              {Object.entries(SERVICE_MODIFIERS).map(([key, val]) => (
-                                <option key={key} value={key}>{val.label}</option>
+                              {Object.entries(SERVICE_MODIFIERS).map(([key, value]) => (
+                                <option key={key} value={key}>
+                                  {value.label}
+                                </option>
                               ))}
                             </select>
                           </div>
-                        </div>
 
-                        {/* Qty & subtotal */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-icon btn-sm"
-                              onClick={() => {
-                                if (item.qty > 1) {
-                                  handleUpdateItem(idx, 'qty', item.qty - 1);
-                                } else {
-                                  handleRemoveItem(idx);
+                          <div className="row" style={{ gap: 12 }}>
+                            <div className="qty">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  item.qty > 1 ? updateItem(index, 'qty', item.qty - 1) : removeItem(index)
                                 }
-                              }}
-                            >
-                              <Minus size={12} />
-                            </button>
-                            <span style={{ fontWeight: '700', minWidth: '20px', textAlign: 'center' }}>
-                              {item.qty}
-                            </span>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-icon btn-sm"
-                              onClick={() => handleUpdateItem(idx, 'qty', item.qty + 1)}
-                            >
-                              <Plus size={12} />
-                            </button>
-                          </div>
+                                aria-label="Diminuir quantidade"
+                              >
+                                {item.qty > 1 ? <Minus size={14} /> : <Trash2 size={13} />}
+                              </button>
+                              <span>{item.qty}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateItem(index, 'qty', item.qty + 1)}
+                                aria-label="Aumentar quantidade"
+                              >
+                                <Plus size={14} />
+                              </button>
+                            </div>
 
-                          <div style={{ minWidth: '80px', textAlign: 'right', fontWeight: '800', color: 'var(--gold-hover)', fontSize: '15px' }}>
-                            {formatBRL(itemSubtotal)}
+                            <span className="money" style={{ minWidth: 82, textAlign: 'right' }}>
+                              {formatBRL(quoteItemSubtotal(item))}
+                            </span>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                )}
 
-              {/* Total Estimated Box */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)' }}>
-                <div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Valor Estimado Preliminar:</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>*Pode variar de acordo com complexidade e estado do móvel</div>
-                </div>
-                <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--gold-hover)' }}>
-                  {formatBRL(estimatedTotal)}
+                {errors.items && <span className="field-error mt-12">{errors.items}</span>}
+
+                <div className="quote-total">
+                  <div>
+                    <div className="fs-12 muted">Valor estimado</div>
+                    <div className="fs-11 muted">
+                      Pode variar conforme a complexidade e o estado do móvel
+                    </div>
+                  </div>
+                  <div className="quote-total-value">{formatBRL(total)}</div>
                 </div>
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Step 3: Date & Details */}
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <div className="card-header">
-              <h3 className="card-title">
-                <Calendar size={18} /> 3. Data Desejada e Detalhes
-              </h3>
+          {/* 3. Agendamento */}
+          <section className="card mb-20">
+            <div className="card-head">
+              <h2 className="card-title">
+                <Calendar size={17} aria-hidden="true" />
+                3. Quando prefere?
+              </h2>
             </div>
+            <div className="card-body">
+              <div className="grid-2">
+                <div className="field">
+                  <label className="label" htmlFor="pq-date">
+                    Data preferida
+                  </label>
+                  <input
+                    id="pq-date"
+                    type="date"
+                    className="input"
+                    min={todayISO()}
+                    value={form.scheduledDate}
+                    onChange={(e) => setForm((c) => ({ ...c, scheduledDate: e.target.value }))}
+                  />
+                </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Data Preferida de Atendimento</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={clientData.scheduledDate}
-                  onChange={(e) => setClientData({ ...clientData, scheduledDate: e.target.value })}
+                <div className="field">
+                  <label className="label" htmlFor="pq-period">
+                    Melhor turno
+                  </label>
+                  <select
+                    id="pq-period"
+                    className="select"
+                    value={form.period}
+                    onChange={(e) => setForm((c) => ({ ...c, period: e.target.value }))}
+                  >
+                    {PERIODS.map((period) => (
+                      <option key={period} value={period}>
+                        {period}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="field mb-0">
+                <label className="label" htmlFor="pq-notes">
+                  Observações
+                </label>
+                <textarea
+                  id="pq-notes"
+                  className="textarea"
+                  value={form.notes}
+                  onChange={(e) => setForm((c) => ({ ...c, notes: e.target.value }))}
+                  placeholder="Ex.: móveis da Mobly, moro no 3º andar sem elevador, tenho animais..."
                 />
               </div>
-
-              <div className="form-group">
-                <label className="form-label">Melhor Turno para Receber o Montador</label>
-                <select
-                  className="form-control"
-                  value={clientData.preferredPeriod}
-                  onChange={(e) => setClientData({ ...clientData, preferredPeriod: e.target.value })}
-                >
-                  <option value="Manhã (08h às 12h)">Manhã (08h às 12h)</option>
-                  <option value="Tarde (13h às 18h)">Tarde (13h às 18h)</option>
-                  <option value="Sábado de Manhã">Sábado de Manhã</option>
-                  <option value="Qualquer Horário">Qualquer Horário</option>
-                </select>
-              </div>
             </div>
+          </section>
 
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Observações Adicionais (Links dos móveis, andar, elevador...)</label>
-              <textarea
-                className="form-control"
-                placeholder="Ex: Móveis comprados na Mobly/MadeiraMadeira, moro no 3º andar, tenho animais de estimação..."
-                value={clientData.notes}
-                onChange={(e) => setClientData({ ...clientData, notes: e.target.value })}
-              />
-            </div>
-          </div>
-
-          {/* Submit CTA */}
-          <button
-            type="submit"
-            className="btn btn-primary btn-lg"
-            style={{ width: '100%', fontSize: '17px', fontWeight: '800' }}
-          >
-            <Send size={18} /> Enviar Orçamento para Marcos Elias (MontaÊ)
+          <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={sending}>
+            {sending ? <span className="spinner" /> : <Send size={18} aria-hidden="true" />}
+            {sending ? 'Enviando...' : 'Enviar meu orçamento'}
           </button>
+
+          <p className="fs-12 muted mt-16" style={{ textAlign: 'center' }}>
+            <ShieldCheck size={13} style={{ display: 'inline', verticalAlign: -2 }} aria-hidden="true" />{' '}
+            Seus dados são usados apenas para o atendimento da MontaÊ.
+          </p>
         </form>
       )}
     </div>

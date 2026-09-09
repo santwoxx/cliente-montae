@@ -1,457 +1,469 @@
-import React, { useState } from 'react';
+// ============================================================
+// MontaÊ - Painel do montador em campo
+//
+// Fluxo: escolher a montagem → conferir os móveis → marcar o
+// checklist de qualidade → colher as duas assinaturas → emitir
+// o comprovante com garantia.
+// ============================================================
+
+import React, { useEffect, useMemo, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { 
-  Smartphone, 
-  MapPin, 
-  Phone, 
-  Clock, 
-  CheckCircle2, 
-  ShieldCheck, 
-  PenTool, 
-  Navigation, 
-  MessageSquare, 
-  Star, 
-  Award, 
-  AlertCircle,
-  Check,
-  Printer
+import {
+  Smartphone,
+  MapPin,
+  Phone,
+  Clock,
+  CheckCircle2,
+  ShieldCheck,
+  Navigation,
+  MessageSquare,
+  Star,
+  Printer,
+  ArrowLeft,
+  PackageCheck
 } from 'lucide-react';
 import SignaturePad from '../components/SignaturePad';
-import { formatBRL, formatDateBR, formatWhatsAppLink } from '../services/calculations';
+import {
+  formatBRL,
+  formatDateBR,
+  formatWhatsAppLink,
+  mapsLink,
+  statusMeta,
+  timestampBR
+} from '../services/calculations';
+import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
+import { useToast } from '../context/ToastContext';
 
-export default function AssemblerView({
-  orders,
-  employees,
-  currentEmployeeId,
-  setCurrentEmployeeId,
-  onSaveOrder,
-  onViewReceipt,
-  selectedOrderId
-}) {
-  const [activeOrderId, setActiveOrderId] = useState(selectedOrderId || null);
+const CHECKLIST = [
+  { key: 'leveling', label: 'Móvel nivelado no chão e no prumo' },
+  { key: 'doorsAdjusted', label: 'Portas alinhadas com dobradiças reguladas' },
+  { key: 'drawersTested', label: 'Gavetas deslizando e puxadores firmes' },
+  { key: 'wallSecured', label: 'Fixação em parede com bucha adequada' },
+  { key: 'areaCleaned', label: 'Local limpo e embalagens recolhidas' }
+];
+
+const EMPTY_CHECKLIST = {
+  leveling: false,
+  doorsAdjusted: false,
+  drawersTested: false,
+  wallSecured: false,
+  areaCleaned: false
+};
+
+export default function AssemblerView({ selectedOrderId, onClearSelection, onViewReceipt }) {
+  const { user, isAdmin } = useAuth();
+  const { orders, employees, saveOrder } = useData();
+  const { toast } = useToast();
+
+  // Um montador vê apenas as próprias montagens; o admin escolhe qual.
+  const defaultEmployeeId = useMemo(() => {
+    if (user?.employeeId) return user.employeeId;
+    const match = employees.find(
+      (employee) => employee.email?.toLowerCase() === user?.email?.toLowerCase()
+    );
+    return match?.id || employees[0]?.id || '';
+  }, [employees, user]);
+
+  const [employeeId, setEmployeeId] = useState(defaultEmployeeId);
+  const [activeId, setActiveId] = useState(selectedOrderId || null);
   const [assemblerSig, setAssemblerSig] = useState(null);
   const [clientSig, setClientSig] = useState(null);
-  const [clientRating, setClientRating] = useState(5);
-  const [checklist, setChecklist] = useState({
-    leveling: true,
-    doorsAdjusted: true,
-    drawersTested: true,
-    wallSecured: true,
-    areaCleaned: true
-  });
-  const [isFinishing, setIsFinishing] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [checklist, setChecklist] = useState(EMPTY_CHECKLIST);
+  const [finishing, setFinishing] = useState(false);
 
-  const currentEmployee = employees.find(e => e.id === currentEmployeeId) || employees[0] || {
-    id: 'emp-1',
-    name: 'Marcos Elias'
+  useEffect(() => {
+    if (defaultEmployeeId && !employeeId) setEmployeeId(defaultEmployeeId);
+  }, [defaultEmployeeId, employeeId]);
+
+  useEffect(() => {
+    if (selectedOrderId) setActiveId(selectedOrderId);
+  }, [selectedOrderId]);
+
+  const employee = employees.find((e) => e.id === employeeId) || employees[0];
+  const activeOrder = activeId ? orders.find((o) => o.id === activeId) : null;
+
+  // Carrega checklist e assinaturas já gravadas ao abrir uma ordem.
+  useEffect(() => {
+    if (!activeOrder) return;
+    setChecklist({ ...EMPTY_CHECKLIST, ...(activeOrder.checklist || {}) });
+    setAssemblerSig(activeOrder.signatures?.assemblerSignature || null);
+    setClientSig(activeOrder.signatures?.clientSignature || null);
+    setRating(activeOrder.signatures?.satisfactionRating || 5);
+  }, [activeOrder?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const myOrders = useMemo(() => {
+    return orders
+      .filter((order) => {
+        if (order.status === 'cancelado') return false;
+        if (isAdmin && !employeeId) return true;
+        return order.employeeId === employeeId;
+      })
+      .sort((a, b) => String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || '')));
+  }, [orders, employeeId, isAdmin]);
+
+  const closeOrder = () => {
+    setActiveId(null);
+    onClearSelection?.();
   };
 
-  // Orders for this employee (or all active if Marcos Elias master)
-  const myOrders = orders.filter(o => 
-    (o.employeeId === currentEmployee.id || (!o.employeeId && currentEmployee.id === 'emp-1')) &&
-    o.status !== 'cancelado'
-  );
-
-  const activeOrder = activeOrderId ? orders.find(o => o.id === activeOrderId) : null;
-
-  const handleStartWork = (order) => {
-    const updated = {
+  const handleStart = async (order) => {
+    await saveOrder({
       ...order,
       status: 'em_andamento',
-      employeeId: currentEmployee.id,
-      employeeName: currentEmployee.name
-    };
-    onSaveOrder(updated);
-    setActiveOrderId(order.id);
+      employeeId: employee?.id || order.employeeId,
+      employeeName: employee?.name || order.employeeName
+    });
+    setActiveId(order.id);
   };
 
-  const handleOpenOrder = (order) => {
-    setActiveOrderId(order.id);
-    if (order.checklist) {
-      setChecklist(order.checklist);
-    }
-    if (order.signatures) {
-      setAssemblerSig(order.signatures.assemblerSignature || null);
-      setClientSig(order.signatures.clientSignature || null);
-      setClientRating(order.signatures.satisfactionRating || 5);
-    } else {
-      setAssemblerSig(null);
-      setClientSig(null);
-    }
-  };
-
-  const handleToggleChecklist = (key) => {
-    setChecklist(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const handleFinishAssembly = (order) => {
+  const handleFinish = async () => {
     if (!assemblerSig) {
-      alert('Por favor, o montador deve assinar no primeiro quadro de assinatura.');
+      toast.error('O montador precisa assinar no primeiro quadro.');
       return;
     }
     if (!clientSig) {
-      alert('Por favor, o cliente deve conferir e assinar no segundo quadro de assinatura.');
+      toast.error('O cliente precisa conferir e assinar no segundo quadro.');
       return;
     }
 
-    setIsFinishing(true);
+    const pending = CHECKLIST.filter((item) => !checklist[item.key]);
+    if (pending.length) {
+      toast.warning(`Confira o checklist: ${pending.length} item(ns) ainda não marcado(s).`);
+      return;
+    }
 
-    const now = new Date();
-    const timestampStr = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    setFinishing(true);
+    const stamp = timestampBR();
 
-    const updated = {
-      ...order,
-      status: 'concluido',
-      completedAt: timestampStr,
-      paymentStatus: 'pago',
-      checklist: checklist,
-      signatures: {
-        assemblerName: currentEmployee.name,
-        assemblerSignature: assemblerSig,
-        assemblerSignedAt: timestampStr,
-        clientName: order.clientName,
-        clientSignature: clientSig,
-        clientSignedAt: timestampStr,
-        satisfactionRating: clientRating
-      }
-    };
+    try {
+      const updated = await saveOrder({
+        ...activeOrder,
+        status: 'concluido',
+        completedAt: stamp,
+        paymentStatus: 'pago',
+        checklist,
+        signatures: {
+          assemblerName: employee?.name || user?.displayName || 'Montador',
+          assemblerSignature: assemblerSig,
+          assemblerSignedAt: stamp,
+          clientName: activeOrder.clientName,
+          clientSignature: clientSig,
+          clientSignedAt: stamp,
+          satisfactionRating: rating
+        }
+      });
 
-    onSaveOrder(updated);
-
-    // Confetti celebration!
-    confetti({
-      particleCount: 100,
-      spread: 70,
-      origin: { y: 0.6 }
-    });
-
-    setTimeout(() => {
-      setIsFinishing(false);
-      onViewReceipt(updated);
-    }, 800);
+      confetti({ particleCount: 110, spread: 72, origin: { y: 0.6 } });
+      toast.success('Montagem concluída e comprovante emitido!');
+      setTimeout(() => onViewReceipt(updated), 500);
+    } catch (error) {
+      console.error(error);
+      toast.error('Não foi possível concluir. Verifique a conexão e tente de novo.');
+    } finally {
+      setFinishing(false);
+    }
   };
 
-  return (
-    <div className="assembler-container" style={{ maxWidth: '800px', margin: '0 auto' }}>
-      {/* Header with Employee Switcher */}
-      <div className="card" style={{ marginBottom: '20px', background: 'linear-gradient(135deg, #181d26 0%, #13171f 100%)', border: '1px solid var(--border-gold)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Smartphone size={20} color="var(--gold-primary)" />
-              <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#fff', margin: 0 }}>
-                Painel do Montador em Campo
-              </h2>
-            </div>
-            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-              Atendimento, checklist de qualidade e assinatura digital dupla na conclusão.
-            </p>
-          </div>
+  const doneCount = CHECKLIST.filter((item) => checklist[item.key]).length;
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Montador:</span>
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto' }}>
+      <div className="field-hero">
+        <div>
+          <h2>
+            <Smartphone size={19} aria-hidden="true" />
+            Painel do montador
+          </h2>
+          <p>Atendimento, checklist de qualidade e assinatura digital dupla na conclusão.</p>
+        </div>
+
+        {(isAdmin || employees.length > 1) && (
+          <div>
+            <span className="field-hero-label">Montador</span>
             <select
-              className="form-control"
-              style={{ width: 'auto', padding: '6px 12px', fontWeight: '700', color: 'var(--gold-hover)', background: '#0b0d11' }}
-              value={currentEmployee.id}
-              onChange={(e) => setCurrentEmployeeId(e.target.value)}
+              className="select select-sm"
+              style={{ width: 'auto' }}
+              value={employeeId}
+              onChange={(e) => {
+                setEmployeeId(e.target.value);
+                closeOrder();
+              }}
+              aria-label="Selecionar montador"
             >
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              {employees.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* If an active order is selected for assembly completion */}
       {activeOrder ? (
-        <div className="card" style={{ border: '1px solid var(--border-gold)', position: 'relative' }}>
-          {/* Back button */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px' }}>
-            <button 
-              className="btn btn-secondary btn-sm"
-              onClick={() => setActiveOrderId(null)}
-            >
-              ← Voltar à Lista de Montagens
+        <div className="card">
+          <div className="card-head">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={closeOrder}>
+              <ArrowLeft size={14} aria-hidden="true" />
+              Voltar
             </button>
-
-            <span className="badge badge-gold" style={{ fontSize: '13px' }}>
-              {activeOrder.id}
+            <span className={`badge badge-${statusMeta(activeOrder.status).tone}`}>
+              {activeOrder.id} · {statusMeta(activeOrder.status).label}
             </span>
           </div>
 
-          {/* Client summary */}
-          <div style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: '20px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '4px' }}>
-              {activeOrder.clientName}
-            </h3>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13.5px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <MapPin size={15} color="var(--gold-primary)" />
-                <span>{activeOrder.address}</span>
+          <div className="card-body">
+            {/* Cliente */}
+            <div className="panel mb-20">
+              <h3 className="fs-17 mb-8">{activeOrder.clientName}</h3>
+              <div className="stack-sm mb-12">
+                <span className="meta">
+                  <MapPin size={14} aria-hidden="true" />
+                  <span>{activeOrder.address}</span>
+                </span>
+                <span className="meta">
+                  <Phone size={14} aria-hidden="true" />
+                  <span>{activeOrder.clientPhone || 'Sem telefone'}</span>
+                </span>
+                <span className="meta">
+                  <Clock size={14} aria-hidden="true" />
+                  <span>
+                    {formatDateBR(activeOrder.scheduledDate)} às {activeOrder.scheduledTime || '09:00'}
+                  </span>
+                </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Phone size={15} color="var(--gold-primary)" />
-                <span>{activeOrder.clientPhone}</span>
+
+              <div className="row" style={{ gap: 8 }}>
+                <a
+                  className="btn btn-secondary btn-sm"
+                  style={{ flex: 1 }}
+                  href={mapsLink(activeOrder.address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Navigation size={14} color="var(--info)" aria-hidden="true" />
+                  Rota / GPS
+                </a>
+                <a
+                  className="btn btn-success btn-sm"
+                  style={{ flex: 1 }}
+                  href={formatWhatsAppLink(
+                    activeOrder.clientPhone,
+                    `Olá ${activeOrder.clientName}! Aqui é da MontaÊ, estou a caminho para a montagem.`
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <MessageSquare size={14} aria-hidden="true" />
+                  WhatsApp
+                </a>
               </div>
             </div>
 
-            {/* GPS and WhatsApp quick links */}
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeOrder.address)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-secondary btn-sm"
-                style={{ flex: 1 }}
-              >
-                <Navigation size={14} color="var(--info)" /> Abrir no GPS / Waze
-              </a>
-              <a
-                href={formatWhatsAppLink(activeOrder.clientPhone, `Olá ${activeOrder.clientName}! Estou a caminho / no local para a montagem dos seus móveis (MontaÊ).`)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-success btn-sm"
-                style={{ flex: 1 }}
-              >
-                <MessageSquare size={14} /> Chamar no WhatsApp
-              </a>
-            </div>
-          </div>
-
-          {/* Furniture items */}
-          <div style={{ marginBottom: '20px' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-              Móveis da Ordem:
-            </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {(activeOrder.items || []).map((it, idx) => (
-                <div key={idx} style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', fontSize: '13.5px' }}>
-                  <span><strong>{it.qty || 1}x</strong> {it.name}</span>
-                  <span style={{ color: 'var(--gold-hover)' }}>{it.room || 'Ambiente'}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Interactive Quality Checklist */}
-          <div style={{ background: 'var(--bg-surface)', padding: '18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: '24px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <ShieldCheck size={18} color="var(--success)" />
-              <h4 style={{ fontSize: '15px', fontWeight: '700', color: '#fff', margin: 0 }}>
-                Checklist de Qualidade Pré-Entrega
-              </h4>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13.5px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={checklist.leveling} 
-                  onChange={() => handleToggleChecklist('leveling')} 
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--gold-primary)' }}
-                />
-                <span>Móvel nivelado no chão e no prumo</span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={checklist.doorsAdjusted} 
-                  onChange={() => handleToggleChecklist('doorsAdjusted')} 
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--gold-primary)' }}
-                />
-                <span>Portas alinhadas com dobradiças reguladas</span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={checklist.drawersTested} 
-                  onChange={() => handleToggleChecklist('drawersTested')} 
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--gold-primary)' }}
-                />
-                <span>Gavetas deslizando suavemente e puxadores firmes</span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={checklist.wallSecured} 
-                  onChange={() => handleToggleChecklist('wallSecured')} 
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--gold-primary)' }}
-                />
-                <span>Fixação em parede segura (bucha/parafuso adequados)</span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={checklist.areaCleaned} 
-                  onChange={() => handleToggleChecklist('areaCleaned')} 
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--gold-primary)' }}
-                />
-                <span>Local limpo, serragem aspirada e papelões organizados</span>
-              </label>
-            </div>
-          </div>
-
-          {/* DUAL DIGITAL SIGNATURE CANVAS SECTION */}
-          <div style={{ background: '#0b0d11', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-gold)', marginBottom: '24px' }}>
-            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
-              <h3 style={{ fontSize: '17px', fontWeight: '800', color: 'var(--gold-hover)', margin: '0 0 4px 0' }}>
-                ✒️ Coleta de Assinatura Digital Dupla
-              </h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                Ambas as partes assinam na tela do celular para validação jurídica e emissão da garantia.
-              </p>
-            </div>
-
-            {/* Signature 1: Assembler */}
-            <SignaturePad
-              title="1. Assinatura do Montador Técnico"
-              signerLabel={`Montador: ${currentEmployee.name} (Confirma montagem e ajustes realizados)`}
-              initialSignature={assemblerSig || activeOrder.signatures?.assemblerSignature}
-              onSave={(dataUrl) => setAssemblerSig(dataUrl)}
-              readOnly={activeOrder.status === 'concluido'}
-            />
-
-            {/* Signature 2: Client */}
-            <SignaturePad
-              title="2. Assinatura do Cliente / Vistoria"
-              signerLabel={`Cliente: ${activeOrder.clientName} (Atesta conferência, funcionamento e garantia)`}
-              initialSignature={clientSig || activeOrder.signatures?.clientSignature}
-              onSave={(dataUrl) => setClientSig(dataUrl)}
-              readOnly={activeOrder.status === 'concluido'}
-            />
-
-            {/* Client satisfaction rating */}
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                Avaliação do Cliente:
-              </span>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {[1, 2, 3, 4, 5].map(star => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => setClientRating(star)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
-                  >
-                    <Star 
-                      size={22} 
-                      fill={star <= clientRating ? '#f59e0b' : 'none'} 
-                      color={star <= clientRating ? '#f59e0b' : '#64748b'} 
-                    />
-                  </button>
+            {/* Itens */}
+            <div className="mb-20">
+              <div className="stat-label mb-8">Móveis desta ordem</div>
+              <div className="stack-sm">
+                {(activeOrder.items || []).map((item, index) => (
+                  <div key={index} className="tile">
+                    <span className="fs-13">
+                      <strong>{item.qty || 1}×</strong> {item.name}
+                    </span>
+                    <span className="badge badge-mute">{item.room || 'Ambiente'}</span>
+                  </div>
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* Action button */}
-          {activeOrder.status === 'concluido' ? (
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button 
-                className="btn btn-outline-gold" 
-                style={{ flex: 1 }}
+            {/* Checklist */}
+            <div className="mb-20">
+              <div className="row-between mb-12">
+                <span className="card-title fs-15">
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  Checklist de qualidade
+                </span>
+                <span className={`badge ${doneCount === CHECKLIST.length ? 'badge-ok' : 'badge-warn'}`}>
+                  {doneCount}/{CHECKLIST.length}
+                </span>
+              </div>
+
+              <div className="stack-sm">
+                {CHECKLIST.map((item) => (
+                  <label key={item.key} className={`check ${checklist[item.key] ? 'is-on' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(checklist[item.key])}
+                      onChange={() =>
+                        setChecklist((current) => ({ ...current, [item.key]: !current[item.key] }))
+                      }
+                      disabled={activeOrder.status === 'concluido'}
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Assinaturas */}
+            <div className="panel mb-20">
+              <div style={{ textAlign: 'center' }} className="mb-16">
+                <h3 className="fs-17">Assinatura digital dupla</h3>
+                <p className="fs-12 muted">
+                  As duas partes assinam na tela para validar o serviço e ativar a garantia.
+                </p>
+              </div>
+
+              <SignaturePad
+                title="1. Montador técnico"
+                signerLabel={`${employee?.name || 'Montador'} — confirma a montagem e os ajustes realizados`}
+                initialSignature={activeOrder.signatures?.assemblerSignature || null}
+                onSave={setAssemblerSig}
+                readOnly={activeOrder.status === 'concluido'}
+              />
+
+              <SignaturePad
+                title="2. Cliente / vistoria"
+                signerLabel={`${activeOrder.clientName} — atesta conferência, funcionamento e garantia`}
+                initialSignature={activeOrder.signatures?.clientSignature || null}
+                onSave={setClientSig}
+                readOnly={activeOrder.status === 'concluido'}
+              />
+
+              <div className="row-between mt-16" style={{ paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+                <span className="fs-13 text-2">Avaliação do cliente</span>
+                <div className="stars">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      className="star-btn"
+                      onClick={() => setRating(star)}
+                      disabled={activeOrder.status === 'concluido'}
+                      aria-label={`${star} estrela${star > 1 ? 's' : ''}`}
+                    >
+                      <Star
+                        size={23}
+                        fill={star <= rating ? '#eab308' : 'none'}
+                        color={star <= rating ? '#eab308' : '#c3c9d3'}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {activeOrder.status === 'concluido' ? (
+              <button
+                type="button"
+                className="btn btn-outline btn-lg btn-block"
                 onClick={() => onViewReceipt(activeOrder)}
               >
-                <Printer size={16} /> Ver Comprovante & Garantia Emitido
+                <Printer size={18} aria-hidden="true" />
+                Ver comprovante e garantia
               </button>
-            </div>
-          ) : (
-            <button
-              className="btn btn-primary btn-lg"
-              style={{ width: '100%', fontSize: '16px', fontWeight: '800' }}
-              disabled={isFinishing}
-              onClick={() => handleFinishAssembly(activeOrder)}
-            >
-              <CheckCircle2 size={20} />
-              {isFinishing ? 'Salvando Assinaturas...' : 'Finalizar Montagem & Emitir Comprovante'}
-            </button>
-          )}
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-lg btn-block"
+                onClick={handleFinish}
+                disabled={finishing}
+              >
+                {finishing ? <span className="spinner" /> : <CheckCircle2 size={19} aria-hidden="true" />}
+                {finishing ? 'Salvando assinaturas...' : 'Finalizar e emitir comprovante'}
+              </button>
+            )}
+          </div>
         </div>
       ) : (
-        /* Orders list for assembler */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Minhas Montagens Agendadas ({myOrders.length}):
-          </h3>
+        <>
+          <h2 className="stat-label mb-12">
+            Minhas montagens ({myOrders.length})
+          </h2>
 
           {myOrders.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-              Nenhuma montagem atribuída para {currentEmployee.name} no momento.
+            <div className="card empty">
+              <div className="empty-icon" aria-hidden="true">
+                <PackageCheck size={24} />
+              </div>
+              <h4>Nenhuma montagem atribuída</h4>
+              <p>
+                Não há ordens para {employee?.name || 'este montador'} no momento. Assim que uma
+                ordem for atribuída, ela aparece aqui.
+              </p>
             </div>
           ) : (
-            myOrders.map(order => {
-              const isConcluded = order.status === 'concluido';
-              const isInProgress = order.status === 'em_andamento';
+            <div className="stack">
+              {myOrders.map((order) => {
+                const meta = statusMeta(order.status);
+                const isDone = order.status === 'concluido';
 
-              return (
-                <div 
-                  key={order.id}
-                  className="card"
-                  style={{
-                    borderLeft: isConcluded ? '4px solid var(--success)' : isInProgress ? '4px solid var(--info)' : '4px solid var(--gold-primary)',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => handleOpenOrder(order)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                    <div>
-                      <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--gold-hover)', textTransform: 'uppercase' }}>
-                        {order.id}
-                      </span>
-                      <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#fff', margin: '2px 0 0 0' }}>
-                        {order.clientName}
-                      </h3>
+                return (
+                  <article
+                    key={order.id}
+                    className={`card card-flag ${meta.flag}`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setActiveId(order.id)}
+                  >
+                    <div className="card-body">
+                      <div className="row-between mb-8" style={{ alignItems: 'flex-start' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span className="fs-11 strong" style={{ color: 'var(--brand)' }}>
+                            {order.id}
+                          </span>
+                          <h3 className="fs-17 truncate">{order.clientName}</h3>
+                        </div>
+                        <span className={`badge badge-${meta.tone}`}>{meta.label}</span>
+                      </div>
+
+                      <div className="stack-sm mb-12">
+                        <span className="meta">
+                          <MapPin size={14} aria-hidden="true" />
+                          <span className="clamp-2">{order.address}</span>
+                        </span>
+                        <span className="meta">
+                          <Clock size={14} aria-hidden="true" />
+                          <span>
+                            {formatDateBR(order.scheduledDate)} às {order.scheduledTime || '09:00'}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div
+                        className="row-between"
+                        style={{ paddingTop: 12, borderTop: '1px solid var(--line)' }}
+                      >
+                        <span className="money">{formatBRL(order.totalValue)}</span>
+
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${isDone ? 'btn-secondary' : 'btn-primary'}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (order.status === 'agendado' || order.status === 'orcamento') {
+                              handleStart(order);
+                            } else if (isDone) {
+                              onViewReceipt(order);
+                            } else {
+                              setActiveId(order.id);
+                            }
+                          }}
+                        >
+                          {isDone
+                            ? 'Ver comprovante'
+                            : order.status === 'em_andamento'
+                              ? 'Coletar assinaturas'
+                              : 'Iniciar atendimento'}
+                        </button>
+                      </div>
                     </div>
-
-                    <div>
-                      {isConcluded && <span className="badge badge-success">✓ Concluído</span>}
-                      {isInProgress && <span className="badge badge-info">Em Andamento</span>}
-                      {order.status === 'agendado' && <span className="badge badge-purple">Agendado</span>}
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <MapPin size={14} color="var(--gold-primary)" />
-                      <span>{order.address}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Clock size={14} color="var(--gold-primary)" />
-                      <span>{formatDateBR(order.scheduledDate)} às {order.scheduledTime || '09:00'}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
-                    <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--gold-hover)' }}>
-                      {formatBRL(order.totalValue)}
-                    </span>
-
-                    <button 
-                      className={`btn btn-sm ${isConcluded ? 'btn-secondary' : 'btn-primary'}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (order.status === 'agendado') {
-                          handleStartWork(order);
-                        } else {
-                          handleOpenOrder(order);
-                        }
-                      }}
-                    >
-                      {isConcluded ? 'Ver Comprovante' : isInProgress ? 'Coletar Assinaturas' : 'Iniciar Atendimento'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+                  </article>
+                );
+              })}
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );
