@@ -71,6 +71,26 @@ function isGoogleSignIn(user) {
   return (user.providerData || []).some((p) => p?.providerId === 'google.com');
 }
 
+/**
+ * Este aparelho deve usar redirecionamento em vez de pop-up?
+ *
+ * Celulares e tablets bloqueiam pop-up com frequência, e navegadores
+ * embutidos (Instagram, Facebook, WhatsApp) nem abrem. Nesses casos o
+ * usuário ficaria olhando um "Conectando..." que nunca termina.
+ */
+function prefersRedirect() {
+  if (typeof window === 'undefined') return false;
+
+  const ua = navigator.userAgent || '';
+  const isInAppBrowser = /FBAN|FBAV|Instagram|Line|WhatsApp|WeChat/i.test(ua);
+  const isTouchPhone =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches &&
+    window.innerWidth < 900;
+
+  return isInAppBrowser || isTouchPhone;
+}
+
 /** Este usuário é um dos donos previstos do sistema? */
 function isAdminEmail(user) {
   const email = (user.email || '').toLowerCase();
@@ -193,18 +213,29 @@ export const AuthService = {
     // quando o aparelho tem vários logins do Google.
     provider.setCustomParameters({ prompt: 'select_account' });
 
+    // Em celular e tablet o pop-up é bloqueado com frequência e o
+    // retorno costuma se perder. O redirecionamento é o caminho
+    // confiável nesses aparelhos.
+    if (prefersRedirect()) {
+      await signInWithRedirect(auth, provider);
+      return null; // a página recarrega e conclui na volta
+    }
+
     try {
       const credential = await signInWithPopup(auth, provider);
       return credential.user;
     } catch (error) {
+      // Casos em que o pop-up não serve: partimos para o redirecionamento.
       const fallbackCodes = [
         'auth/popup-blocked',
         'auth/operation-not-supported-in-this-environment',
-        'auth/cancelled-popup-request'
+        'auth/cancelled-popup-request',
+        'auth/internal-error',
+        'auth/web-storage-unsupported'
       ];
       if (fallbackCodes.includes(error?.code)) {
         await signInWithRedirect(auth, provider);
-        return null; // a página recarrega e volta pelo redirect
+        return null;
       }
       throw error;
     }

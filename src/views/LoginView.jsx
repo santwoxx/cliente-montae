@@ -33,13 +33,24 @@ export default function LoginView({ onOpenPublicQuote }) {
 
   const handleGoogle = async () => {
     setGoogleBusy(true);
-    try {
-      await signInWithGoogle();
-      // Se o navegador tiver caído no fluxo de redirecionamento, a
-      // página recarrega sozinha e o login conclui na volta.
-    } catch (error) {
-      toast.error(describeAuthError(error));
+
+    // Rede de segurança: se o pop-up for fechado, bloqueado ou o
+    // retorno se perder, o botão volta ao normal em vez de ficar
+    // preso em "Conectando..." para sempre.
+    const watchdog = setTimeout(() => {
       setGoogleBusy(false);
+      toast.info('O login não foi concluído. Tente novamente ou use e-mail e senha.');
+    }, 25000);
+
+    try {
+      const user = await signInWithGoogle();
+      // Sem usuário = o navegador foi para o fluxo de redirecionamento
+      // e a página vai recarregar; mantemos o "Conectando...".
+      if (user) clearTimeout(watchdog);
+    } catch (error) {
+      clearTimeout(watchdog);
+      setGoogleBusy(false);
+      toast.error(describeAuthError(error));
     }
   };
 
