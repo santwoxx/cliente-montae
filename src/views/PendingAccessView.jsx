@@ -32,6 +32,11 @@ export default function PendingAccessView() {
 
         <div className="panel mt-20" style={{ textAlign: 'left' }}>
           <div className="strong fs-13 mb-8">É você o dono do sistema?</div>
+          <p className="fs-12 text-2 mb-8">
+            Se o seu e-mail é um dos administradores previstos, entre pelo botão{' '}
+            <strong>&quot;Entrar com o Google&quot;</strong> — a liberação é automática. O acesso
+            por e-mail e senha nunca concede administração, por segurança.
+          </p>
           <p className="fs-12 text-2">
             No primeiro acesso ainda não existe nenhum administrador. Abra o Firebase Console,
             vá em <strong>Firestore Database</strong> → coleção <strong>users</strong> → o documento

@@ -48,6 +48,24 @@ service cloud.firestore {
       return isAdmin() || isAssembler();
     }
 
+    // ---------- Donos do sistema ----------
+    // Estes e-mails entram direto como administradores, SEM precisar
+    // de liberacao manual. A concessao exige login pelo Google: assim
+    // o proprio Google comprova que a pessoa e dona daquela caixa de
+    // e-mail. Num cadastro por e-mail e senha o endereco e apenas
+    // digitado, entao qualquer um poderia se passar pelo dono.
+    //
+    // Mantenha esta lista igual a VITE_ADMIN_EMAILS do front-end.
+    function isOwnerEmail() {
+      return isSignedIn()
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+             'brisasofc@gmail.com',
+             'marcos.elias.sc@gmail.com'
+           ];
+    }
+
     // ---------- users ----------
     // Um usuario novo so consegue criar o proprio documento como
     // "pendente" e inativo: e impossivel se auto-promover a admin.
@@ -56,14 +74,28 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isStaff() && (request.auth.uid == uid || isActiveStaff());
 
+      // Conta nova: os donos entram como admin; todo o resto nasce
+      // pendente, sem acesso a nenhum dado, ate um admin liberar.
       allow create: if isStaff()
                     && request.auth.uid == uid
                     && request.resource.data.email == request.auth.token.email
-                    && request.resource.data.role == 'pendente'
-                    && request.resource.data.active == false;
+                    && (
+                         (request.resource.data.role == 'pendente'
+                          && request.resource.data.active == false)
+                         || (isOwnerEmail()
+                             && request.resource.data.role == 'admin'
+                             && request.resource.data.active == true)
+                       );
 
-      // O proprio usuario pode ajustar apenas o nome de exibicao.
+      // Um admin gerencia todo mundo; um dono pode se autopromover
+      // (caso a conta tenha sido criada antes desta regra existir);
+      // e qualquer usuario ajusta apenas o proprio nome de exibicao,
+      // sem tocar no papel nem na liberacao.
       allow update: if isAdmin()
+                    || (isOwnerEmail()
+                        && request.auth.uid == uid
+                        && request.resource.data.role == 'admin'
+                        && request.resource.data.active == true)
                     || (isStaff()
                         && request.auth.uid == uid
                         && request.resource.data.role == resource.data.role

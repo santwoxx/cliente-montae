@@ -26,7 +26,7 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, isFirebaseEnabled, OWNER_EMAIL } from '../lib/firebase';
+import { auth, db, isFirebaseEnabled, OWNER_EMAIL, ADMIN_EMAILS } from '../lib/firebase';
 
 export const ROLES = {
   ADMIN: 'admin',
@@ -62,16 +62,47 @@ export function describeAuthError(error) {
 }
 
 /**
- * Lê (ou cria) o documento de perfil do usuário.
- * Contas novas nascem como "pendente" — as regras do Firestore
- * impedem que alguém se cadastre já como administrador.
+ * O login foi feito com a conta Google? Só nesse caso confiamos no
+ * endereço de e-mail para conceder administração automaticamente:
+ * o Google comprova a posse da caixa. Num cadastro por e-mail e
+ * senha o endereço é apenas digitado, sem nenhuma prova.
  */
+function isGoogleSignIn(user) {
+  return (user.providerData || []).some((p) => p?.providerId === 'google.com');
+}
+
+/** Este usuário é um dos donos previstos do sistema? */
+function isAdminEmail(user) {
+  const email = (user.email || '').toLowerCase();
+  return isGoogleSignIn(user) && ADMIN_EMAILS.includes(email);
+}
+
 async function resolveUserProfile(user) {
   const ref = doc(db, 'users', user.uid);
   const snapshot = await getDoc(ref);
+  const shouldBeAdmin = isAdminEmail(user);
 
   if (snapshot.exists()) {
     const data = snapshot.data();
+
+    // Dono do sistema que ainda está como pendente (por exemplo,
+    // criou a conta antes desta regra existir): promove na hora.
+    if (shouldBeAdmin && (data.role !== ROLES.ADMIN || data.active !== true)) {
+      try {
+        await setDoc(ref, { role: ROLES.ADMIN, active: true }, { merge: true });
+        return {
+          uid: user.uid,
+          email: user.email,
+          displayName: data.displayName || user.displayName || user.email,
+          role: ROLES.ADMIN,
+          active: true,
+          employeeId: data.employeeId || null
+        };
+      } catch (error) {
+        console.warn('[MontaÊ] Não foi possível promover a admin:', error?.code);
+      }
+    }
+
     return {
       uid: user.uid,
       email: user.email,
@@ -82,13 +113,16 @@ async function resolveUserProfile(user) {
     };
   }
 
-  const isOwner = OWNER_EMAIL && user.email?.toLowerCase() === OWNER_EMAIL;
+  // Conta nova: os e-mails da lista entram como administradores;
+  // os demais ficam pendentes até um admin liberar.
+  const role = shouldBeAdmin ? ROLES.ADMIN : ROLES.PENDING;
+  const active = shouldBeAdmin;
 
   await setDoc(ref, {
     email: user.email,
     displayName: user.displayName || user.email,
-    role: ROLES.PENDING,
-    active: false,
+    role,
+    active,
     createdAt: serverTimestamp()
   });
 
@@ -96,11 +130,12 @@ async function resolveUserProfile(user) {
     uid: user.uid,
     email: user.email,
     displayName: user.displayName || user.email,
-    role: ROLES.PENDING,
-    active: false,
+    role,
+    active,
     employeeId: null,
-    // Dica exibida na tela de espera para o dono do sistema.
-    isOwnerEmail: Boolean(isOwner)
+    // Avisa a tela de espera de que este e-mail deveria ser admin,
+    // caso as regras do Firestore ainda não estejam publicadas.
+    isOwnerEmail: ADMIN_EMAILS.includes((user.email || '').toLowerCase())
   };
 }
 

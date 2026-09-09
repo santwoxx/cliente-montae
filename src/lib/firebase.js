@@ -46,6 +46,25 @@ export const OWNER_EMAIL = (env.VITE_OWNER_EMAIL || 'marcos.elias.sc@gmail.com')
   .trim()
   .toLowerCase();
 
+/**
+ * E-mails que entram direto como administradores.
+ *
+ * Só vale para quem entra com o Google: nesse caso o próprio Google
+ * comprova que a pessoa é dona daquela caixa de e-mail. Com login de
+ * e-mail e senha qualquer um poderia se cadastrar digitando um destes
+ * endereços e virar admin — por isso a lista é ignorada nesse fluxo,
+ * tanto aqui quanto nas regras do Firestore.
+ *
+ * Ao mudar esta lista, mude também a lista dentro de firestore.rules
+ * e publique as regras — senão o Firestore recusa a gravação.
+ */
+export const ADMIN_EMAILS = (
+  env.VITE_ADMIN_EMAILS || 'brisasofc@gmail.com,marcos.elias.sc@gmail.com'
+)
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
 let app = null;
 let db = null;
 let auth = null;
