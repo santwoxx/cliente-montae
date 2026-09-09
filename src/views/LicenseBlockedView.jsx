@@ -47,7 +47,9 @@ export default function LicenseBlockedView({ license, companyName }) {
         <div className="panel mt-20" style={{ textAlign: 'left' }}>
           <div className="row-between fs-13 mb-8">
             <span className="muted">Vencimento</span>
-            <strong style={{ color: 'var(--bad)' }}>{formatDateBR(license?.paidUntil)}</strong>
+            <strong style={{ color: 'var(--bad)' }}>
+              {formatDateBR(license?.dueDate || license?.paidUntil)}
+            </strong>
           </div>
           <div className="row-between fs-13">
             <span className="muted">Situação</span>

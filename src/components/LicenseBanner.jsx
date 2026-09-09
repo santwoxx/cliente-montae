@@ -32,7 +32,7 @@ export default function LicenseBanner({ companyName }) {
       <div className="notice-body">
         <div className="notice-title">Mensalidade do sistema {label}</div>
         <div className="notice-text">
-          Vencimento em {formatDateBR(license.paidUntil)}. Regularize para não perder o acesso ao
+          Vencimento em {formatDateBR(license.dueDate || license.paidUntil)}. Regularize para não perder o acesso ao
           sistema — WhatsApp {LICENSE_INFO.vendorPhoneLabel}.
         </div>
       </div>
