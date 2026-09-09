@@ -1,28 +1,46 @@
 // ============================================================
 // MontaÊ - Entrada no sistema
-// Login, criação de conta e recuperação de senha.
+//
+// Caminho principal: conta Google (um toque, sem senha).
+// Caminho secundário: e-mail e senha, para o montador que não
+// tem Gmail ou usa um aparelho compartilhado da equipe.
 // ============================================================
 
 import React, { useState } from 'react';
-import { LogIn, UserPlus, Mail, Lock, User, ArrowLeft, Sparkles } from 'lucide-react';
+import { LogIn, UserPlus, Mail, Lock, User, ArrowLeft, Sparkles, KeyRound } from 'lucide-react';
 import Logo from '../components/Logo';
+import GoogleIcon from '../components/GoogleIcon';
 import { describeAuthError } from '../services/auth';
 import { isValidEmail } from '../services/calculations';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 export default function LoginView({ onOpenPublicQuote }) {
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signInWithGoogle, signIn, signUp, resetPassword } = useAuth();
   const { toast } = useToast();
 
-  const [mode, setMode] = useState('login'); // login | signup | reset
+  /** 'google' = tela inicial | 'login' | 'signup' | 'reset' */
+  const [mode, setMode] = useState('google');
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const update = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
     if (errors[field]) setErrors((current) => ({ ...current, [field]: undefined }));
+  };
+
+  const handleGoogle = async () => {
+    setGoogleBusy(true);
+    try {
+      await signInWithGoogle();
+      // Se o navegador tiver caído no fluxo de redirecionamento, a
+      // página recarrega sozinha e o login conclui na volta.
+    } catch (error) {
+      toast.error(describeAuthError(error));
+      setGoogleBusy(false);
+    }
   };
 
   const validate = () => {
@@ -63,9 +81,10 @@ export default function LoginView({ onOpenPublicQuote }) {
     }
   };
 
-  const titles = {
-    login: { title: 'Acessar o sistema', sub: 'Entre com seu e-mail e senha' },
-    signup: { title: 'Criar conta', sub: 'Seu acesso é liberado pelo administrador' },
+  const headings = {
+    google: { title: 'Acessar o sistema', sub: 'Entre com sua conta Google' },
+    login: { title: 'Acesso da equipe', sub: 'Entre com o e-mail e a senha cadastrados' },
+    signup: { title: 'Criar conta de funcionário', sub: 'O acesso é liberado pelo administrador' },
     reset: { title: 'Recuperar senha', sub: 'Enviaremos um link para o seu e-mail' }
   };
 
@@ -82,113 +101,157 @@ export default function LoginView({ onOpenPublicQuote }) {
           </div>
         </div>
 
-        <h1 className="auth-title">{titles[mode].title}</h1>
-        <p className="auth-sub mb-20">{titles[mode].sub}</p>
+        <h1 className="auth-title">{headings[mode].title}</h1>
+        <p className="auth-sub mb-20">{headings[mode].sub}</p>
 
-        <form onSubmit={handleSubmit} noValidate>
-          {mode === 'signup' && (
-            <div className="field">
-              <label className="label" htmlFor="lg-name">
-                Nome completo
-              </label>
-              <div className="search">
-                <User size={16} aria-hidden="true" />
-                <input
-                  id="lg-name"
-                  className={`input ${errors.name ? 'is-invalid' : ''}`}
-                  value={form.name}
-                  onChange={(e) => update('name', e.target.value)}
-                  placeholder="Ex.: Marcos Elias"
-                  autoComplete="name"
-                />
-              </div>
-              {errors.name && <span className="field-error">{errors.name}</span>}
+        {/* ---------- Tela inicial: Google ---------- */}
+        {mode === 'google' && (
+          <>
+            <button
+              type="button"
+              className="btn btn-google btn-lg btn-block"
+              onClick={handleGoogle}
+              disabled={googleBusy}
+            >
+              {googleBusy ? <span className="spinner is-dark" /> : <GoogleIcon size={19} />}
+              {googleBusy ? 'Conectando...' : 'Entrar com o Google'}
+            </button>
+
+            <div className="auth-divider">
+              <span>ou</span>
             </div>
-          )}
 
-          <div className="field">
-            <label className="label" htmlFor="lg-email">
-              E-mail
-            </label>
-            <div className="search">
-              <Mail size={16} aria-hidden="true" />
-              <input
-                id="lg-email"
-                type="email"
-                className={`input ${errors.email ? 'is-invalid' : ''}`}
-                value={form.email}
-                onChange={(e) => update('email', e.target.value)}
-                placeholder="voce@email.com"
-                autoComplete="email"
-                inputMode="email"
-              />
-            </div>
-            {errors.email && <span className="field-error">{errors.email}</span>}
-          </div>
-
-          {mode !== 'reset' && (
-            <div className="field">
-              <label className="label" htmlFor="lg-password">
-                Senha
-              </label>
-              <div className="search">
-                <Lock size={16} aria-hidden="true" />
-                <input
-                  id="lg-password"
-                  type="password"
-                  className={`input ${errors.password ? 'is-invalid' : ''}`}
-                  value={form.password}
-                  onChange={(e) => update('password', e.target.value)}
-                  placeholder="Mínimo de 6 caracteres"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                />
-              </div>
-              {errors.password && <span className="field-error">{errors.password}</span>}
-            </div>
-          )}
-
-          <button type="submit" className="btn btn-primary btn-lg btn-block mt-8" disabled={busy}>
-            {busy ? (
-              <span className="spinner" />
-            ) : mode === 'signup' ? (
-              <UserPlus size={17} aria-hidden="true" />
-            ) : (
-              <LogIn size={17} aria-hidden="true" />
-            )}
-            {busy
-              ? 'Aguarde...'
-              : mode === 'login'
-                ? 'Entrar'
-                : mode === 'signup'
-                  ? 'Criar conta'
-                  : 'Enviar link'}
-          </button>
-        </form>
-
-        {mode === 'login' && (
-          <button type="button" className="auth-link mt-16" onClick={() => setMode('reset')}>
-            Esqueci minha senha
-          </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-block"
+              onClick={() => setMode('login')}
+            >
+              <KeyRound size={16} aria-hidden="true" />
+              Sou funcionário (e-mail e senha)
+            </button>
+          </>
         )}
 
-        <div className="auth-switch">
-          {mode === 'login' ? (
-            <>
-              Ainda não tem conta?{' '}
-              <button type="button" className="auth-link" onClick={() => setMode('signup')}>
-                Criar agora
+        {/* ---------- E-mail e senha ---------- */}
+        {mode !== 'google' && (
+          <>
+            <form onSubmit={handleSubmit} noValidate>
+              {mode === 'signup' && (
+                <div className="field">
+                  <label className="label" htmlFor="lg-name">
+                    Nome completo
+                  </label>
+                  <div className="input-icon">
+                    <User size={16} aria-hidden="true" />
+                    <input
+                      id="lg-name"
+                      className={`input ${errors.name ? 'is-invalid' : ''}`}
+                      value={form.name}
+                      onChange={(e) => update('name', e.target.value)}
+                      placeholder="Ex.: Carlos Eduardo"
+                      autoComplete="name"
+                    />
+                  </div>
+                  {errors.name && <span className="field-error">{errors.name}</span>}
+                </div>
+              )}
+
+              <div className="field">
+                <label className="label" htmlFor="lg-email">
+                  E-mail
+                </label>
+                <div className="input-icon">
+                  <Mail size={16} aria-hidden="true" />
+                  <input
+                    id="lg-email"
+                    type="email"
+                    className={`input ${errors.email ? 'is-invalid' : ''}`}
+                    value={form.email}
+                    onChange={(e) => update('email', e.target.value)}
+                    placeholder="voce@email.com"
+                    autoComplete="email"
+                    inputMode="email"
+                  />
+                </div>
+                {errors.email && <span className="field-error">{errors.email}</span>}
+              </div>
+
+              {mode !== 'reset' && (
+                <div className="field">
+                  <label className="label" htmlFor="lg-password">
+                    Senha
+                  </label>
+                  <div className="input-icon">
+                    <Lock size={16} aria-hidden="true" />
+                    <input
+                      id="lg-password"
+                      type="password"
+                      className={`input ${errors.password ? 'is-invalid' : ''}`}
+                      value={form.password}
+                      onChange={(e) => update('password', e.target.value)}
+                      placeholder="Mínimo de 6 caracteres"
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    />
+                  </div>
+                  {errors.password && <span className="field-error">{errors.password}</span>}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary btn-lg btn-block mt-8"
+                disabled={busy}
+              >
+                {busy ? (
+                  <span className="spinner" />
+                ) : mode === 'signup' ? (
+                  <UserPlus size={17} aria-hidden="true" />
+                ) : (
+                  <LogIn size={17} aria-hidden="true" />
+                )}
+                {busy
+                  ? 'Aguarde...'
+                  : mode === 'login'
+                    ? 'Entrar'
+                    : mode === 'signup'
+                      ? 'Criar conta'
+                      : 'Enviar link'}
               </button>
-            </>
-          ) : (
-            <button type="button" className="auth-link" onClick={() => setMode('login')}>
-              <ArrowLeft size={13} style={{ display: 'inline', verticalAlign: -2 }} aria-hidden="true" />{' '}
-              Voltar para o login
-            </button>
-          )}
-        </div>
+            </form>
+
+            {mode === 'login' && (
+              <div className="row-between mt-16">
+                <button type="button" className="auth-link" onClick={() => setMode('reset')}>
+                  Esqueci minha senha
+                </button>
+                <button type="button" className="auth-link" onClick={() => setMode('signup')}>
+                  Criar conta
+                </button>
+              </div>
+            )}
+
+            <div className="auth-switch">
+              <button
+                type="button"
+                className="auth-link"
+                onClick={() => {
+                  setMode('google');
+                  setErrors({});
+                }}
+              >
+                <ArrowLeft size={13} style={{ display: 'inline', verticalAlign: -2 }} aria-hidden="true" />{' '}
+                Voltar e entrar com o Google
+              </button>
+            </div>
+          </>
+        )}
 
         {onOpenPublicQuote && (
-          <button type="button" className="btn btn-ghost btn-sm btn-block mt-16" onClick={onOpenPublicQuote}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-block mt-16"
+            onClick={onOpenPublicQuote}
+          >
             <Sparkles size={14} aria-hidden="true" />
             Sou cliente e quero um orçamento
           </button>

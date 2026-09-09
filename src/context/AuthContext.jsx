@@ -13,6 +13,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Quando o login do Google usa redirecionamento (celular), a volta
+    // precisa ser processada antes de decidirmos se há sessão ativa.
+    AuthService.completeRedirectSignIn?.();
+
     const unsubscribe = AuthService.observe((profile) => {
       setUser(profile);
       setLoading(false);
@@ -33,6 +37,7 @@ export function AuthProvider({ children }) {
       isApproved: Boolean(isAdmin || isAssembler),
       isAdmin,
       isAssembler,
+      signInWithGoogle: AuthService.signInWithGoogle,
       signIn: AuthService.signIn,
       signUp: AuthService.signUp,
       signOut: AuthService.signOut,

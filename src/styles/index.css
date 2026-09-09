@@ -292,10 +292,14 @@ h5 {
   box-shadow: var(--sh-sm);
 }
 
+/* O arquivo da marca é largo (2,7:1). Num selo quadrado mostramos
+   só o trecho da esquerda, onde fica o ícone "M" — sem `object-position`
+   o `cover` cortaria justamente o miolo do texto. */
 .brand-mark img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: left center;
 }
 
 .brand-mark span {
@@ -1112,7 +1116,28 @@ h5 {
   gap: 14px;
 }
 
-/* Campo de busca com ícone embutido. */
+/* Campo com ícone embutido, para formulários em coluna.
+   Não leva `flex`: dentro de um .field (que é coluna) uma base
+   flexível viraria ALTURA e jogaria o ícone para longe do campo. */
+.input-icon {
+  position: relative;
+  display: block;
+}
+
+.input-icon > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.input-icon > .input {
+  padding-left: 38px;
+}
+
+/* Campo de busca das barras de ferramentas (layout horizontal). */
 .search {
   position: relative;
   flex: 1 1 260px;
@@ -1817,21 +1842,24 @@ h5 {
   text-align: center;
 }
 
+/* Na tela de login mostramos a marca inteira, na proporcao original
+   (2,7:1), em vez de espremer num quadrado e cortar o nome. */
 .auth-logo {
-  width: 62px;
-  height: 62px;
+  width: auto;
+  max-width: 200px;
+  height: auto;
+  padding: 10px 16px;
   border-radius: var(--r-lg);
   background: var(--ink);
-  display: grid;
-  place-items: center;
+  display: block;
   overflow: hidden;
   box-shadow: var(--sh-md);
 }
 
 .auth-logo img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  object-fit: contain;
 }
 
 .auth-title {
@@ -1842,6 +1870,39 @@ h5 {
 .auth-sub {
   font-size: 13px;
   color: var(--text-2);
+}
+
+/* Botão do Google: fundo branco e traço cinza, como manda a
+   diretriz de marca — nunca com a cor da nossa marca por cima. */
+.btn-google {
+  background: #ffffff;
+  color: #3c4043;
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--sh-xs);
+  font-weight: 600;
+}
+
+.btn-google:hover:not(:disabled) {
+  background: #f8f9fa;
+  border-color: #b9bfc9;
+  box-shadow: var(--sh-sm);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 
 .auth-switch {

@@ -11,6 +11,10 @@
 // ============================================================
 
 import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInAnonymously,
@@ -42,7 +46,14 @@ const ERROR_MESSAGES = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
   'auth/network-request-failed': 'Sem conexão com a internet. Verifique sua rede.',
   'auth/operation-not-allowed': 'Método de login não habilitado no Firebase Console.',
-  'auth/admin-restricted-operation': 'Login anônimo não habilitado no Firebase Console.'
+  'auth/admin-restricted-operation': 'Login anônimo não habilitado no Firebase Console.',
+  'auth/popup-closed-by-user': 'A janela do Google foi fechada antes de concluir.',
+  'auth/cancelled-popup-request': 'Havia outra janela de login aberta.',
+  'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Tentando outro modo...',
+  'auth/unauthorized-domain':
+    'Este endereço não está autorizado no Firebase (Authentication › Settings › Authorized domains).',
+  'auth/account-exists-with-different-credential':
+    'Este e-mail já tem conta com outro método de acesso.'
 };
 
 export function describeAuthError(error) {
@@ -130,6 +141,50 @@ export const AuthService = {
         });
       }
     });
+  },
+
+  /**
+   * Login com a conta Google — caminho principal para o dono do
+   * sistema e para quem já usa Gmail. Sem senha para memorizar.
+   *
+   * Em celular o pop-up costuma ser bloqueado, então caímos para o
+   * fluxo de redirecionamento, que sempre funciona.
+   */
+  async signInWithGoogle() {
+    await setPersistence(auth, browserLocalPersistence);
+
+    const provider = new GoogleAuthProvider();
+    // Força a escolha da conta: evita entrar sozinho na conta errada
+    // quando o aparelho tem vários logins do Google.
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    try {
+      const credential = await signInWithPopup(auth, provider);
+      return credential.user;
+    } catch (error) {
+      const fallbackCodes = [
+        'auth/popup-blocked',
+        'auth/operation-not-supported-in-this-environment',
+        'auth/cancelled-popup-request'
+      ];
+      if (fallbackCodes.includes(error?.code)) {
+        await signInWithRedirect(auth, provider);
+        return null; // a página recarrega e volta pelo redirect
+      }
+      throw error;
+    }
+  },
+
+  /** Conclui o login por redirecionamento após a página recarregar. */
+  async completeRedirectSignIn() {
+    if (!isFirebaseEnabled) return null;
+    try {
+      const credential = await getRedirectResult(auth);
+      return credential?.user || null;
+    } catch (error) {
+      console.warn('[MontaÊ] Falha ao concluir login por redirecionamento:', error?.code);
+      return null;
+    }
   },
 
   async signIn(email, password) {

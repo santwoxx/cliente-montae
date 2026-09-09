@@ -69,8 +69,13 @@ sigilo da chave. Ainda assim, três passos no console são obrigatórios:
 
 Firebase Console → **Authentication** → **Sign-in method** → ative:
 
-- ✅ **E-mail/senha** — usado pela equipe
+- ✅ **Google** — forma principal de entrar (dono e equipe com Gmail, um toque, sem senha)
+- ✅ **E-mail/senha** — para o funcionário que não tem conta Google
 - ✅ **Anônimo** — usado pelo visitante do link público (sem isso o orçamento não é enviado)
+
+> Ao ativar o **Google**, o console pede um *e-mail de suporte do projeto*.
+> Escolha o seu e-mail e salve — sem isso o botão retorna
+> `auth/operation-not-allowed`.
 
 ### 2. Criar o banco
 
