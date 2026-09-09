@@ -25,6 +25,7 @@ dist-ssr
 
 # Temp files
 logo_temp.jpeg
+scratch/
 
 # Ambiente
 .env

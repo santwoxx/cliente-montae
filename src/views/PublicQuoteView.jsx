@@ -184,7 +184,7 @@ export default function PublicQuoteView({ onBackToAdmin }) {
       )}
 
       <header className="quote-hero">
-        <Logo className="" size={68} alt="MontaÊ" />
+        <Logo size={68} alt="MontaÊ" />
         <h1>Monte seu orçamento</h1>
         <div className="tag">{profile?.slogan || 'MONTA. REPARA. CONECTA.'}</div>
         <p>

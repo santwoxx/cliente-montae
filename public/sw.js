@@ -9,11 +9,23 @@
      - resto      -> rede, guardando uma cópia
    ============================================================ */
 
-const VERSION = 'montae-v2';
+const VERSION = 'montae-v2.1';
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 
-const SHELL_FILES = ['/', '/index.html', '/manifest.webmanifest', '/logo.jpeg'];
+const SHELL_FILES = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/logo.jpeg',
+  '/logo-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  '/favicon.ico',
+  '/favicon-32.png',
+  '/favicon-64.png'
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

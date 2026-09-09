@@ -103,13 +103,7 @@ export default function LoginView({ onOpenPublicQuote }) {
     <div className="auth-screen">
       <div className="auth-card">
         <div className="auth-brand">
-          <Logo className="auth-logo" size={62} />
-          <div>
-            <div className="brand-name" style={{ fontSize: 22 }}>
-              Monta<em>Ê</em>
-            </div>
-            <div className="brand-tag">Monta. Repara. Conecta.</div>
-          </div>
+          <Logo className="auth-logo" variant="full" alt="MontaÊ" />
         </div>
 
         <h1 className="auth-title">{headings[mode].title}</h1>

@@ -12,6 +12,7 @@ import {
   formatWhatsAppLink
 } from '../services/calculations';
 import { useToast } from '../context/ToastContext';
+import Logo from './Logo';
 
 const CHECKLIST_LABELS = {
   leveling: 'Nivelamento e esquadro',
@@ -90,13 +91,7 @@ export default function ReceiptModal({ order, profile, onClose }) {
             {/* Cabeçalho */}
             <header className="receipt-head">
               <div className="receipt-brand">
-                <img
-                  src="/logo.jpeg"
-                  alt=""
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
+                <Logo size={52} alt="MontaÊ" />
                 <div>
                   <h1>
                     Monta<em>Ê</em>

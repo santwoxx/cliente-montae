@@ -30,7 +30,7 @@ export default function LicenseBlockedView({ license, companyName }) {
     <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 460, textAlign: 'center' }}>
         <div className="auth-brand">
-          <Logo className="auth-logo" size={62} />
+          <Logo className="auth-logo" variant="full" alt="MontaÊ" />
         </div>
 
         <div className="confirm-icon is-danger" style={{ width: 56, height: 56 }}>

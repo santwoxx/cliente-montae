@@ -17,7 +17,7 @@ export default function PendingAccessView() {
     <div className="auth-screen">
       <div className="auth-card" style={{ textAlign: 'center' }}>
         <div className="auth-brand">
-          <Logo className="auth-logo" size={62} />
+          <Logo className="auth-logo" variant="full" alt="MontaÊ" />
         </div>
 
         <div className="confirm-icon is-info" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>
