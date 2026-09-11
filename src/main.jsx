@@ -6,7 +6,16 @@ import { ToastProvider } from './context/ToastContext.jsx';
 import { LicenseProvider } from './context/LicenseContext.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { DataProvider } from './context/DataContext.jsx';
+import { AuthService } from './services/auth.js';
 import './styles/index.css';
+
+const CURRENT_VERSION = '1.0.1';
+if (localStorage.getItem('app_version') !== CURRENT_VERSION) {
+  localStorage.setItem('app_version', CURRENT_VERSION);
+  AuthService.signOut().then(() => {
+    window.location.reload();
+  });
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
